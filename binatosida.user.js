@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📥 انتقال از بینا به سیدا (جمع‌آوری خودکار)
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      1.0
 // @description  جمع‌آوری خودکار همه دانش‌آموزان از بینا با iframe
 // @author       یوسف معصومی
 // @match        https://bina.medu.ir/*
