@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛠️ جعبه ابزار هوشمند سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.0
+// @version      15.1
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -5209,54 +5209,6 @@ function extractClassListTool() {
             return grades;
         }
 
-        // گرفتن کدهای دانش‌آموزان یک کلاس از API
-        async function fetchClassStudentsCodes(classRoomId) {
-            let token = getToken();
-            if (!token) return [];
-
-            try {
-                let response = await fetch('/api/Student/GetStudentInfo', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: {
-                        'Content-Type': 'application/json; charset=utf-8',
-                        'Accept': 'application/json, text/javascript, */*; q=0.01',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Authorization': 'Bearer ' + token,
-                        'client-id': getClientId()
-                    },
-                    body: JSON.stringify({
-                        take: 500,
-                        skip: 0,
-                        page: 1,
-                        pageSize: 500,
-                        sort: [{ field: 'id', dir: 'asc' }],
-                        filter: {
-                            logic: 'and',
-                            filters: [{
-                                field: 'classRoomId',
-                                operator: 'eq',
-                                value: classRoomId
-                            }]
-                        }
-                    })
-                });
-
-                if (!response.ok) throw new Error('HTTP ' + response.status);
-
-                let json = await response.json();
-                let items = (json.data && json.data.data) || json.data || [];
-
-                return items.map(function(item) {
-                    return String(item.nationalCode || '').trim();
-                }).filter(function(c) { return c && c.length > 3; });
-
-            } catch(e) {
-                console.error('خطا در کلاس ' + classRoomId + ':', e);
-                return [];
-            }
-        }
-
         // ساخت Word برای یک کلاس (با ستون‌های جدا برای تلفن‌ها)
         function generateClassWordFile(className, students) {
             if (!students || students.length === 0) {
@@ -5315,7 +5267,7 @@ function extractClassListTool() {
             setTimeout(function(){ URL.revokeObjectURL(link.href); }, 1000);
         }
 
-        // تابع اصلی: استخراج کلاسی با شماره تماس‌ها
+        // تابع اصلی: استخراج کلاسی با شماره تماس‌ها (نسخه جایگزین — بدون فیلتر)
         async function extractByClasses() {
             // 1. چک کردن لیست مشخصات
             if (!allStudents || allStudents.length === 0) {
@@ -5338,53 +5290,173 @@ function extractClassListTool() {
                 }
             });
 
-            // 4. تایید از کاربر
+            // 4. ساخت Map از classRoomId به اطلاعات کلاس
+            let classIdToInfo = {};
+            grades.forEach(function(g) {
+                g.classNames.forEach(function(c) {
+                    classIdToInfo[String(c.id)] = {
+                        className: c.name,
+                        gradeName: g.gradeName
+                    };
+                });
+            });
+
+            // 5. تایید از کاربر
             let totalClasses = grades.reduce(function(sum, g) { return sum + g.classNames.length; }, 0);
-            if (!confirm('📊 ' + totalClasses + ' کلاس پیدا شد.\n\nبرای هر کلاس، یه فایل Word با مشخصات دانش‌آموزانش ساخته می‌شه.\n\nادامه؟')) {
+            if (!confirm('📊 ' + totalClasses + ' کلاس پیدا شد.\n\n' +
+                         'روش کار:\n' +
+                         '1. همهٔ دانش‌آموزان مدرسه از API دریافت می‌شن\n' +
+                         '2. بر اساس کلاس گروه‌بندی می‌شن\n' +
+                         '3. برای هر کلاس، یه فایل Word ساخته می‌شه\n\n' +
+                         'ادامه؟')) {
                 return;
             }
 
-            // 5. حلقه روی پایه‌ها و کلاس‌ها
-            let totalStudentsFound = 0;
-            let totalStudentsMissing = 0;
-            let processedClasses = 0;
+            // 6. دریافت همهٔ دانش‌آموزان از API (بدون فیلتر)
+            updatePanelUI('⏳ دریافت همه دانش‌آموزان از API...');
 
-            for (let g of grades) {
-                for (let c of g.classNames) {
-                    processedClasses++;
-                    updatePanelUI('⏳ (' + processedClasses + '/' + totalClasses + ') ' + c.name + '...');
+            let token = getToken();
+            if (!token) {
+                alert('❌ توکن پیدا نشد! لطفاً دوباره لاگین کن.');
+                return;
+            }
 
-                    // گرفتن کدهای دانش‌آموزان این کلاس
-                    let codes = await fetchClassStudentsCodes(c.id);
+            let allFetchedFromAPI = [];
+            let page = 1;
+            let pageSize = 500;
+            let hasMore = true;
 
-                    // تطبیق با مشخصات ذخیره‌شده
-                    let classStudents = [];
-                    codes.forEach(function(code) {
-                        let cleanCode = String(code).trim();
-                        if (studentsMap[cleanCode]) {
-                            classStudents.push(studentsMap[cleanCode]);
-                            totalStudentsFound++;
-                        } else {
-                            totalStudentsMissing++;
-                        }
+            while (hasMore) {
+                try {
+                    let response = await fetch('/api/Student/GetStudentInfo', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {
+                            'Content-Type': 'application/json; charset=utf-8',
+                            'Accept': 'application/json, text/javascript, */*; q=0.01',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Authorization': 'Bearer ' + token,
+                            'client-id': getClientId()
+                        },
+                        body: JSON.stringify({
+                            take: pageSize,
+                            skip: (page - 1) * pageSize,
+                            page: page,
+                            pageSize: pageSize,
+                            sort: [{ field: 'id', dir: 'asc' }]
+                        })
                     });
 
-                    // ساخت Word
-                    if (classStudents.length > 0) {
-                        generateClassWordFile(c.name, classStudents);
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+
+                    let json = await response.json();
+                    let items = (json.data && json.data.data) || json.data || [];
+
+                    if (!Array.isArray(items) || items.length === 0) {
+                        hasMore = false;
+                        break;
                     }
 
-                    // تاخیر برای دانلودها
-                    await sleep(1200);
+                    allFetchedFromAPI = allFetchedFromAPI.concat(items);
+                    updatePanelUI('⏳ دریافت شد: ' + allFetchedFromAPI.length);
+
+                    if (items.length < pageSize) {
+                        hasMore = false;
+                    } else {
+                        page++;
+                    }
+
+                    await sleep(200);
+
+                } catch(e) {
+                    console.error('خطا در دریافت صفحه ' + page + ':', e);
+                    alert('❌ خطا در دریافت از API: ' + e.message);
+                    return;
                 }
             }
 
-            // 6. گزارش نهایی
+            if (allFetchedFromAPI.length === 0) {
+                alert('❌ هیچ دانش‌آموزی از API دریافت نشد!');
+                return;
+            }
+
+            updatePanelUI('⏳ گروه‌بندی ' + allFetchedFromAPI.length + ' دانش‌آموز...');
+
+            // 7. گروه‌بندی بر اساس classRoomId
+            let classGroups = {};
+
+            allFetchedFromAPI.forEach(function(item) {
+                let classRoomId = String(item.classRoomId || '').trim();
+                let nationalCode = String(item.nationalCode || '').trim();
+
+                if (!classRoomId) return;
+                if (!classIdToInfo[classRoomId]) return;
+
+                let studentData = studentsMap[nationalCode];
+
+                if (!studentData) {
+                    studentData = {
+                        name: (item.firstName || '').trim(),
+                        family: (item.lastName || '').trim(),
+                        father: (item.fatherName || '').trim(),
+                        codemelli: nationalCode,
+                        birthDate: String(item.birthDate || '').trim(),
+                        fatherPhone: normalizePhone(item.fatherMobileNumber),
+                        motherPhone: normalizePhone(item.motherMobileNumber),
+                        shadPhone: normalizePhone(item.studentMobileNumber)
+                    };
+                }
+
+                if (!classGroups[classRoomId]) {
+                    classGroups[classRoomId] = [];
+                }
+                classGroups[classRoomId].push(studentData);
+            });
+
+            // 8. شمارش
+            let totalStudentsFound = 0;
+            let processedClasses = 0;
+
+            Object.keys(classGroups).forEach(function(classRoomId) {
+                if (classGroups[classRoomId].length > 0) {
+                    processedClasses++;
+                    totalStudentsFound += classGroups[classRoomId].length;
+                }
+            });
+
+            // 9. ساخت Word برای هر کلاس (با ترتیب پایه و کلاس)
+            updatePanelUI('⏳ ساخت فایل‌های Word...');
+
+            let orderedClassIds = [];
+            grades.forEach(function(g) {
+                g.classNames.forEach(function(c) {
+                    let id = String(c.id);
+                    if (classGroups[id] && classGroups[id].length > 0) {
+                        orderedClassIds.push(id);
+                    }
+                });
+            });
+
+            let wordIndex = 0;
+            for (let classId of orderedClassIds) {
+                let students = classGroups[classId];
+                let info = classIdToInfo[classId];
+                wordIndex++;
+
+                updatePanelUI('⏳ (' + wordIndex + '/' + orderedClassIds.length + ') ' + info.className + '...');
+
+                generateClassWordFile(info.className, students);
+
+                await sleep(1200);
+            }
+
+            // 10. گزارش نهایی
             updatePanelUI('✅ تمام! ' + processedClasses + ' کلاس پردازش شد.');
             alert('✅ استخراج کلاسی تمام شد!\n\n' +
                   '📊 کلاس‌های پردازش‌شده: ' + processedClasses + '\n' +
                   '👥 دانش‌آموزان پیدا شده: ' + totalStudentsFound + '\n' +
-                  '⚠️ بدون مشخصات: ' + totalStudentsMissing);
+                  '📦 کل دانش‌آموزان API: ' + allFetchedFromAPI.length + '\n' +
+                  '⚠️ کلاس‌های بدون دانش‌آموز: ' + (totalClasses - processedClasses));
         }
 
         // ==================== ساخت پنل ====================
@@ -5437,7 +5509,6 @@ function extractClassListTool() {
 
         showNotification('پنل آماده است. دکمه "شروع" را بزنید.');
     }
-
     // ==================== ابزار ۱۲: تحلیل نمرات ====================
     function gradeAnalysisTool() {
         if (document.getElementById('gradeCollectorPanel')) {
