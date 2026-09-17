@@ -5,6 +5,8 @@
 // @description  نسخه موبایل داشبورد ۱۴ ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
+// @updateURL    https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/sidatools-mobile.user.js
+// @downloadURL  https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/sidatools-mobile.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @require      https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
