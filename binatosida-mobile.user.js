@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         📱 انتقال از بینا به سیدا (نسخه موبایل)
 // @namespace    http://tampermonkey.net/
-// @version      1.0-mobile
+// @version      1.0
 // @description  جمع‌آوری خودکار همه دانش‌آموزان از بینا - نسخه موبایل
 // @author       یوسف معصومی
 // @match        https://bina.medu.ir/*
+// @updateURL    https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/binatosida-mobile.user.js
+// @downloadURL  https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/binatosida-mobile.user.js
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @run-at       document-end
