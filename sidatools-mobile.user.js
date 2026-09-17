@@ -1,8 +1,8 @@
 ﻿// ==UserScript==
 // @name         📱 داشبورد موبایل ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  نسخه موبایل داشبورد ۱۴ ابزار سیدا - قفل‌دار
+// @version      15.0
+// @description  نسخه موبایل داشبورد 15 ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
 // @updateURL    https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/sidatools-mobile.user.js
@@ -7527,6 +7527,9 @@ function extractClassListTool() {
 
         switchTab('actions');
     }
+        // ✅ فقط روی موبایل اجرا بشه
+    if (!/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) return;
+
     createMobileDashboard();
     setInterval(createMobileDashboard, 2000);
 })();
