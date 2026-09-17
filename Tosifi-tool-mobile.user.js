@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📝 ثبت نمرات توصیفی (نسخه موبایل)
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      2.0
 // @description  دکمه شناور ثبت نمرات توصیفی برای موبایل
 // @author       You
 // @match        https://sida.medu.ir/*
