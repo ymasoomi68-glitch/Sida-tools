@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         🛠️ ابزارهای سیدا
+// @name         🛠️ جعبه ابزار هوشمند سیدا
 // @namespace    http://tampermonkey.net/
 // @version      15.0
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
