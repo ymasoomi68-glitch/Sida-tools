@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         🛠️ ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.8
+// @version      15.5
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
-// @updateURL    https://cdn.jsdelivr.net/gh/ymasoomi68-glitch/Sida-tools@main/sidatools-user.js
-// @downloadURL  https://cdn.jsdelivr.net/gh/ymasoomi68-glitch/Sida-tools@main/sidatools-user.js
+// @updateURL    https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/sidatools-user.js
+// @downloadURL  https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/sidatools-user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @require      https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
