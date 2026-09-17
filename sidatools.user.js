@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛠️ ابزارهای هوشمند سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.0
+// @version      15.1
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
