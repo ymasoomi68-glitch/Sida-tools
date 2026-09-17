@@ -5,10 +5,12 @@
 // @description  جمع‌آوری خودکار همه دانش‌آموزان از بینا با iframe
 // @author       یوسف معصومی
 // @match        https://bina.medu.ir/*
+// @updateURL    https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/binatosida.user.js
+// @downloadURL  https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/binatosida.user.js
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @run-at       document-end
-// ==/UserScript==
+// ==/UserScript===
 
 (function(){
     'use strict';
