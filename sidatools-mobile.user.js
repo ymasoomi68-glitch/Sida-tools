@@ -1,8 +1,8 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         📱 داشبورد موبایل ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.1
-// @description  نسخه موبایل داشبورد 15 ابزار سیدا - قفل‌دار
+// @version      15.0
+// @description  نسخه موبایل داشبورد15 ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
 // @updateURL    https://raw.githubusercontent.com/ymasoomi68-glitch/Sida-tools/main/sidatools-mobile.user.js
@@ -4513,7 +4513,6 @@ function extractClassListTool() {
 
     createPanel();
 }
-	
 // ==================== ابزار ۱۱: استخراج مشخصات (نسخه API) ====================
     function smartInfoExtractTool() {
         if (document.getElementById('autoExtractPanel')) {
@@ -4634,7 +4633,6 @@ function extractClassListTool() {
             return 'mt1ag7vh-f9qt51vf-is5kslgz-am182rru-3pu0h0ne';
         }
 
-        // ✅ اضافه شد: تابع خواندن فیلتر گرید
         function getGridFilter() {
             try {
                 var gridEl = document.querySelector('.k-grid');
@@ -4659,14 +4657,11 @@ function extractClassListTool() {
             }
 
             var clientId = getClientId();
-
-            // ✅ اضافه شد: خواندن فیلتر گرید
             var gridFilter = getGridFilter();
 
             console.log('🔑 Token:', token.substring(0, 50) + '...');
             console.log('🔑 Client-ID:', clientId);
 
-            // ✅ اضافه شد: نمایش فیلتر فعال
             if (gridFilter) {
                 console.log('📊 فیلتر گرید:', JSON.stringify(gridFilter));
                 var filterDesc = 'نامشخص';
@@ -4678,7 +4673,6 @@ function extractClassListTool() {
 
             while (hasMore && isRunning) {
                 try {
-                    // ✅ اضافه شد: body با فیلتر
                     var body = {
                         take: pageSize,
                         skip: (page - 1) * pageSize,
@@ -4687,7 +4681,6 @@ function extractClassListTool() {
                         sort: [{ field: 'id', dir: 'asc' }]
                     };
 
-                    // ✅ اضافه شد: اضافه کردن فیلتر
                     if (gridFilter) {
                         body.filter = gridFilter;
                     }
@@ -4872,6 +4865,212 @@ function extractClassListTool() {
             showNotification('فایل Word با موفقیت دانلود شد!');
         }
 
+        // ==================== توابع جدید: استخراج کلاسی ====================
+
+        // پیدا کردن پایه‌ها و کلاس‌ها از صفحه SchoolClasses
+        function findGradesAndClasses() {
+            let grades = [];
+            let rows = document.querySelectorAll('table.table-bordered tbody tr');
+            rows.forEach(function(row) {
+                let btn = row.querySelector('button[ng-click*="addStudents"]');
+                if (!btn) return;
+                try {
+                    let s = angular.element(row).scope();
+                    if (s && s.x) {
+                        let x = s.x;
+                        grades.push({
+                            gradeTypeId: x.gradeTypeId,
+                            gradeName: x.gradeName,
+                            createSchoolClassId: x.createSchoolClassId,
+                            classNames: (x.classNames || []).map(function(c) {
+                                return { id: c.id, name: c.name };
+                            })
+                        });
+                    }
+                } catch(e) {}
+            });
+            return grades;
+        }
+
+        // گرفتن کدهای دانش‌آموزان یک کلاس از API
+        async function fetchClassStudentsCodes(classRoomId) {
+            let token = getToken();
+            if (!token) return [];
+
+            try {
+                let response = await fetch('/api/Student/GetStudentInfo', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json; charset=utf-8',
+                        'Accept': 'application/json, text/javascript, */*; q=0.01',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Authorization': 'Bearer ' + token,
+                        'client-id': getClientId()
+                    },
+                    body: JSON.stringify({
+                        take: 500,
+                        skip: 0,
+                        page: 1,
+                        pageSize: 500,
+                        sort: [{ field: 'id', dir: 'asc' }],
+                        filter: {
+                            logic: 'and',
+                            filters: [{
+                                field: 'classRoomId',
+                                operator: 'eq',
+                                value: classRoomId
+                            }]
+                        }
+                    })
+                });
+
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+
+                let json = await response.json();
+                let items = (json.data && json.data.data) || json.data || [];
+
+                return items.map(function(item) {
+                    return String(item.nationalCode || '').trim();
+                }).filter(function(c) { return c && c.length > 3; });
+
+            } catch(e) {
+                console.error('خطا در کلاس ' + classRoomId + ':', e);
+                return [];
+            }
+        }
+
+        // ساخت Word برای یک کلاس (با ستون‌های جدا برای تلفن‌ها)
+        function generateClassWordFile(className, students) {
+            if (!students || students.length === 0) {
+                return;
+            }
+
+            var htmlContent = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
+            htmlContent += '<head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">';
+            htmlContent += '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->';
+            htmlContent += '<style>@page { size: A4 landscape; margin: 1.2cm; }';
+            htmlContent += 'table { border-collapse: collapse; width: 100%; font-family: "B Nazanin", "Tahoma", sans-serif; font-size: 11pt; direction: rtl; }';
+            htmlContent += 'th { background-color: #4472C4; color: white; font-weight: bold; border: 1px solid #000; padding: 6px 8px; text-align: center; font-size: 10pt; }';
+            htmlContent += 'td { border: 1px solid #000; padding: 5px 6px; text-align: center; font-size: 10pt; }';
+            htmlContent += 'h2, h3 { text-align: center; font-family: "B Nazanin", "Tahoma", sans-serif; }';
+            htmlContent += '.phone-cell { font-family: "Courier New", monospace; direction: ltr; text-align: center; font-size: 10pt; }';
+            htmlContent += '</style></head><body>';
+
+            htmlContent += '<h2>مشخصات دانش‌آموزان کلاس ' + escapeHtml(className) + '</h2>';
+            htmlContent += '<h3>تعداد: ' + students.length + ' نفر</h3>';
+            htmlContent += '<table><thead><tr>';
+            htmlContent += '<th>ردیف</th>';
+            htmlContent += '<th>نام خانوادگی</th>';
+            htmlContent += '<th>نام</th>';
+            htmlContent += '<th>نام پدر</th>';
+            htmlContent += '<th>کد ملی</th>';
+            htmlContent += '<th>تاریخ تولد</th>';
+            htmlContent += '<th>تلفن پدر</th>';
+            htmlContent += '<th>تلفن مادر</th>';
+            htmlContent += '<th>تلفن شاد</th>';
+            htmlContent += '</tr></thead><tbody>';
+
+            students.forEach(function(s, index) {
+                htmlContent += '<tr>';
+                htmlContent += '<td>' + (index + 1) + '</td>';
+                htmlContent += '<td>' + escapeHtml(s.family || '') + '</td>';
+                htmlContent += '<td>' + escapeHtml(s.name || '') + '</td>';
+                htmlContent += '<td>' + escapeHtml(s.father || '') + '</td>';
+                htmlContent += '<td class="phone-cell">' + escapeHtml(s.codemelli || '') + '</td>';
+                htmlContent += '<td>' + escapeHtml(s.birthDate || '') + '</td>';
+                htmlContent += '<td class="phone-cell">' + escapeHtml(s.fatherPhone || '-') + '</td>';
+                htmlContent += '<td class="phone-cell">' + escapeHtml(s.motherPhone || '-') + '</td>';
+                htmlContent += '<td class="phone-cell">' + escapeHtml(s.shadPhone || '-') + '</td>';
+                htmlContent += '</tr>';
+            });
+
+            htmlContent += '</tbody></table></body></html>';
+
+            var blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
+            var link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            var safeName = className.replace(/[^\u0600-\u06FF\w\s\-]/g, '').replace(/\s+/g, ' ').trim();
+            link.download = 'لیست کلاس ' + safeName + '.doc';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(function(){ URL.revokeObjectURL(link.href); }, 1000);
+        }
+
+        // تابع اصلی: استخراج کلاسی با شماره تماس‌ها
+        async function extractByClasses() {
+            // 1. چک کردن لیست مشخصات
+            if (!allStudents || allStudents.length === 0) {
+                alert('❌ اول باید استخراج مشخصات رو انجام بدی!\n\nبرو تو صفحه «مشخصات فردی» و دکمه «▶️ شروع» رو بزن، بعد دوباره برگرد.');
+                return;
+            }
+
+            // 2. چک کردن صفحه
+            let grades = findGradesAndClasses();
+            if (grades.length === 0) {
+                alert('❌ ساختار پایه‌ها پیدا نشد!\n\nمطمئن شو تو صفحه «کلاس‌های مدرسه» (#/SchoolClasses) هستی.');
+                return;
+            }
+
+            // 3. ساخت Map از کد ملی به مشخصات
+            let studentsMap = {};
+            allStudents.forEach(function(s) {
+                if (s.codemelli) {
+                    studentsMap[String(s.codemelli).trim()] = s;
+                }
+            });
+
+            // 4. تایید از کاربر
+            let totalClasses = grades.reduce(function(sum, g) { return sum + g.classNames.length; }, 0);
+            if (!confirm('📊 ' + totalClasses + ' کلاس پیدا شد.\n\nبرای هر کلاس، یه فایل Word با مشخصات دانش‌آموزانش ساخته می‌شه.\n\nادامه؟')) {
+                return;
+            }
+
+            // 5. حلقه روی پایه‌ها و کلاس‌ها
+            let totalStudentsFound = 0;
+            let totalStudentsMissing = 0;
+            let processedClasses = 0;
+
+            for (let g of grades) {
+                for (let c of g.classNames) {
+                    processedClasses++;
+                    updatePanelUI('⏳ (' + processedClasses + '/' + totalClasses + ') ' + c.name + '...');
+
+                    // گرفتن کدهای دانش‌آموزان این کلاس
+                    let codes = await fetchClassStudentsCodes(c.id);
+
+                    // تطبیق با مشخصات ذخیره‌شده
+                    let classStudents = [];
+                    codes.forEach(function(code) {
+                        let cleanCode = String(code).trim();
+                        if (studentsMap[cleanCode]) {
+                            classStudents.push(studentsMap[cleanCode]);
+                            totalStudentsFound++;
+                        } else {
+                            totalStudentsMissing++;
+                        }
+                    });
+
+                    // ساخت Word
+                    if (classStudents.length > 0) {
+                        generateClassWordFile(c.name, classStudents);
+                    }
+
+                    // تاخیر برای دانلودها
+                    await sleep(1200);
+                }
+            }
+
+            // 6. گزارش نهایی
+            updatePanelUI('✅ تمام! ' + processedClasses + ' کلاس پردازش شد.');
+            alert('✅ استخراج کلاسی تمام شد!\n\n' +
+                  '📊 کلاس‌های پردازش‌شده: ' + processedClasses + '\n' +
+                  '👥 دانش‌آموزان پیدا شده: ' + totalStudentsFound + '\n' +
+                  '⚠️ بدون مشخصات: ' + totalStudentsMissing);
+        }
+
+        // ==================== ساخت پنل ====================
         function createPanel() {
             let panel = document.createElement('div');
             panel.id = 'autoExtractPanel';
@@ -4892,6 +5091,7 @@ function extractClassListTool() {
                         '<button id="btnStop" style="flex:1;background:#ef4444;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">⛔ توقف</button>' +
                     '</div>' +
                     '<button id="btnDownload" style="background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">📥 دانلود Word</button>' +
+                    '<button id="btnClassExtract" style="background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">📊 استخراج کلاسی با شماره تماس‌ها</button>' +
                     '<button id="btnClear" style="background:#fff;color:#c62828;border:1px solid #c62828;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;margin-top:5px;">🗑️ پاک‌سازی</button>' +
                 '</div>' +
                 '<div style="margin-top:10px;font-size:11px;color:#666;text-align:center;border-top:1px solid #eee;padding-top:8px;">' +
@@ -4908,6 +5108,7 @@ function extractClassListTool() {
             document.getElementById('btnStart').addEventListener('click', startExtraction);
             document.getElementById('btnStop').addEventListener('click', stopExtraction);
             document.getElementById('btnDownload').addEventListener('click', downloadWord);
+            document.getElementById('btnClassExtract').addEventListener('click', extractByClasses);
             document.getElementById('btnClear').addEventListener('click', clearMemory);
         }
 
@@ -7528,7 +7729,7 @@ function extractClassListTool() {
         switchTab('actions');
     }
        // ✅ فقط روی دستگاه‌های لمسی یا موبایل اجرا بشه
-if (!('ontouchstart' in window) && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) return;
+  if (!('ontouchstart' in window) && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) return;
 
     createMobileDashboard();
     setInterval(createMobileDashboard, 2000);
