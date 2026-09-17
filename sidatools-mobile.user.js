@@ -7527,8 +7527,8 @@ function extractClassListTool() {
 
         switchTab('actions');
     }
-        // ✅ فقط روی موبایل اجرا بشه
-    if (!/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) return;
+       // ✅ فقط روی دستگاه‌های لمسی یا موبایل اجرا بشه
+if (!('ontouchstart' in window) && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) return;
 
     createMobileDashboard();
     setInterval(createMobileDashboard, 2000);
