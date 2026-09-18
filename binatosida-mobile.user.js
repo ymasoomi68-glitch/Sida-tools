@@ -1397,9 +1397,8 @@
             panel.style.width = Math.min(rect.width, window.innerWidth - 20) + 'px';
         }, { passive: true });
 
-        header.addEventListener('touchmove', function(e){
+                header.addEventListener('touchmove', function(e){
             if(!isTouchDraggingPanel) return;
-            e.preventDefault();
             var touch = e.touches[0];
             var newLeft = touch.clientX - touchPanelOffsetX;
             var newTop = touch.clientY - touchPanelOffsetY;
@@ -1409,7 +1408,7 @@
             newTop = Math.max(0, Math.min(newTop, maxY));
             panel.style.left = newLeft + 'px';
             panel.style.top = newTop + 'px';
-        }, { passive: false });
+        }, { passive: true });
 
         header.addEventListener('touchend', function(){
             isTouchDraggingPanel = false;
