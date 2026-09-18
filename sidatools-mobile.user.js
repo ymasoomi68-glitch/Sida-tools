@@ -17,7 +17,7 @@
 (function() {
     'use strict';
 
-                // ==================== کد امنیتی (هش شده) ====================
+    // ==================== کد امنیتی (هش شده) ====================
     // هش کدهای مجاز مدرسه
     const MY_SCHOOL_HASHES = [
         'd10fddcb314a2a80',  // کد مدرسه 40980416
@@ -25,11 +25,11 @@
         'a711f5bcf73d5557',  // کد مدرسه 96118217
         'f32cce53c8a7a236',  // کد مدرسه 96118256
         '23622e837f0a02a3',  // کد مدرسه 96083457
-		'3f37947bce473f90',  // کد مدرسه 78111706
+        '3f37947bce473f90',  // کد مدرسه 78111706
         '77f1ce33cf8167b4',  // کد مدرسه 40970636
         '464d14a0061fda2b',  // کد مدرسه 40970639
         '1db30f48a7da93f0',  // کد مدرسه 40990919
-	    '9aefb234a56dae10',  // کد مدرسه 40990635
+        '9aefb234a56dae10',  // کد مدرسه 40990635
         '4fd0c64c157f4148'   // کد مدرسه 80059089
     ];
 
@@ -38,21 +38,21 @@
     const DEFAULT_Y = 10;
 
     // ==================== تابع هش کردن ====================
-            function hashString(str) {
+    function hashString(str) {
         const salt = 'masoomi68_sida_tool_v15';
         const combined = str + salt;
         let hash1 = 0x811c9dc5;
         let hash2 = 0x01000193;
-        
+
         for (let i = 0; i < combined.length; i++) {
             const char = combined.charCodeAt(i);
             hash1 = (hash1 ^ char) * 16777619;
             hash2 = (hash2 ^ char) * 16777619;
         }
-        
+
         const part1 = (hash1 >>> 0).toString(16).padStart(8, '0');
         const part2 = (hash2 >>> 0).toString(16).padStart(8, '0');
-        
+
         return part1 + part2;
     }
 
@@ -84,12 +84,12 @@
         if (!currentCode) {
             return { allowed: false, current: 'کد مدرسه پیدا نشد', reason: 'not_found' };
         }
-        
+
         const currentHash = hashString(currentCode);
         if (MY_SCHOOL_HASHES.includes(currentHash)) {
             return { allowed: true, current: currentCode };
         }
-        
+
         return { allowed: false, current: currentCode, reason: 'mismatch' };
     }
 
@@ -189,16 +189,16 @@
         // رویداد کپی آیدی
         const copyBtn = document.getElementById('copy-id-btn');
         const copyMsg = document.getElementById('copy-message');
-        
+
         copyBtn.addEventListener('click', function() {
             const textToCopy = '@masoomi68';
-            
+
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(textToCopy).then(() => {
                     copyMsg.style.opacity = '1';
                     copyBtn.style.borderColor = '#10b981';
                     copyBtn.style.color = '#10b981';
-                    
+
                     setTimeout(() => {
                         copyMsg.style.opacity = '0';
                         copyBtn.style.borderColor = '#3ecfe0';
@@ -223,11 +223,11 @@
             textarea.setSelectionRange(0, 99999);
             document.execCommand('copy');
             document.body.removeChild(textarea);
-            
+
             copyMsg.style.opacity = '1';
             copyBtn.style.borderColor = '#10b981';
             copyBtn.style.color = '#10b981';
-            
+
             setTimeout(() => {
                 copyMsg.style.opacity = '0';
                 copyBtn.style.borderColor = '#3ecfe0';
@@ -250,54 +250,165 @@
             'gradePanel',
             'nationalityPanel'
         ];
-        
+
         panelIds.forEach(id => {
             const panel = document.getElementById(id);
             if (panel) panel.remove();
         });
-        
+
         const overlays = document.querySelectorAll('#gradeReportOverlay, #nationalityReportOverlay, #reportContainer');
         overlays.forEach(overlay => overlay.remove());
     }
 
-    // ==================== تابع جابه‌جایی لمسی ====================
+    // ==================== تابع جابه‌جایی لمسی (نسخه نهایی) ====================
     function makeDraggableByTouch(element, handle) {
+        if (!element || !handle) return;
+
+        // ✅ جلوگیری از اسکرول/زوم صفحه هنگام درگ هدر
+        handle.style.touchAction = 'none';
+
         let isDragging = false;
-        let startX, startY, offsetX, offsetY;
+        let startX = 0, startY = 0;
+        let elementStartLeft = 0, elementStartTop = 0;
 
-        handle.addEventListener('touchstart', (e) => {
+        function getPoint(e) {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            if (e.changedTouches && e.changedTouches.length > 0) {
+                return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        }
+
+        // ✅ تشخیص خودکار دکمه‌های کنترلی (بدون نیاز به لیست کردن id ها)
+        function isControlButton(target) {
+            if (!target || !target.closest) return false;
+
+            // اگه خود handle هست، درگ کن (مثل دکمه داشبورد که خودش یه button هست)
+            if (target === handle) return false;
+
+            // نزدیک‌ترین عنصر کنترلی بین target و handle
+            const controlEl = target.closest(
+                'button, a, ' +
+                '[style*="cursor:pointer"], [style*="cursor: pointer"], ' +
+                '#cp-min, #cp-reset, #cp-close, ' +
+                '#pfb-min, #pfb-reset, #pfb-close, ' +
+                '#mp-min, #mp-reset, #mp-close'
+            );
+
+            if (!controlEl) return false;
+            if (controlEl === handle) return false;
+            if (!handle.contains(controlEl)) return false;
+
+            return true;
+        }
+
+        function onStart(e) {
+            if (isControlButton(e.target)) return;
+
+            const point = getPoint(e);
             isDragging = true;
-            const touch = e.touches[0];
-            startX = touch.clientX;
-            startY = touch.clientY;
-            offsetX = startX - element.getBoundingClientRect().left;
-            offsetY = startY - element.getBoundingClientRect().top;
-            handle.style.cursor = 'grabbing';
-        }, { passive: false });
+            startX = point.x;
+            startY = point.y;
 
-        document.addEventListener('touchmove', (e) => {
+            const rect = element.getBoundingClientRect();
+            elementStartLeft = rect.left;
+            elementStartTop = rect.top;
+
+            element.style.right = 'auto';
+            element.style.bottom = 'auto';
+            element.style.left = elementStartLeft + 'px';
+            element.style.top = elementStartTop + 'px';
+        }
+
+        function onMove(e) {
             if (!isDragging) return;
-            const touch = e.touches[0];
-            const deltaX = touch.clientX - startX;
-            const deltaY = touch.clientY - startY;
-            
-            if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
-                e.preventDefault();
-                element.style.left = (touch.clientX - offsetX) + 'px';
-                element.style.top = (touch.clientY - offsetY) + 'px';
-                element.style.right = 'auto';
-                element.style.bottom = 'auto';
-            }
-        }, { passive: false });
 
-        document.addEventListener('touchend', () => {
-            if (isDragging) {
-                isDragging = false;
-                handle.style.cursor = '';
-            }
+            const point = getPoint(e);
+            const deltaX = point.x - startX;
+            const deltaY = point.y - startY;
+
+            let newLeft = elementStartLeft + deltaX;
+            let newTop = elementStartTop + deltaY;
+
+            const maxX = window.innerWidth - element.offsetWidth;
+            const maxY = window.innerHeight - element.offsetHeight;
+            newLeft = Math.max(0, Math.min(newLeft, maxX));
+            newTop = Math.max(0, Math.min(newTop, maxY));
+
+            element.style.left = newLeft + 'px';
+            element.style.top = newTop + 'px';
+        }
+
+        function onEnd(e) {
+            if (!isDragging) return;
+            isDragging = false;
+
+            try {
+                const rect = element.getBoundingClientRect();
+                if (typeof GM_setValue !== 'undefined') {
+                    const id = element.id;
+                    if (id) {
+                        GM_setValue(id + '_x', Math.round(rect.left));
+                        GM_setValue(id + '_y', Math.round(rect.top));
+                    }
+                }
+            } catch(err) {}
+        }
+
+        // ===== Touch Events =====
+        handle.addEventListener('touchstart', onStart, { passive: true });
+        document.addEventListener('touchmove', onMove, { passive: true });
+        document.addEventListener('touchend', onEnd, { passive: true });
+        document.addEventListener('touchcancel', onEnd, { passive: true });
+
+        // ===== Mouse Events =====
+        handle.addEventListener('mousedown', function(e) {
+            if (e.button !== 0) return;
+            if (isControlButton(e.target)) return;
+
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+
+            const rect = element.getBoundingClientRect();
+            elementStartLeft = rect.left;
+            elementStartTop = rect.top;
+
+            element.style.right = 'auto';
+            element.style.bottom = 'auto';
+            element.style.left = elementStartLeft + 'px';
+            element.style.top = elementStartTop + 'px';
+
+            e.preventDefault();
         });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+
+            let newLeft = elementStartLeft + deltaX;
+            let newTop = elementStartTop + deltaY;
+
+            const maxX = window.innerWidth - element.offsetWidth;
+            const maxY = window.innerHeight - element.offsetHeight;
+            newLeft = Math.max(0, Math.min(newLeft, maxX));
+            newTop = Math.max(0, Math.min(newTop, maxY));
+
+            element.style.left = newLeft + 'px';
+            element.style.top = newTop + 'px';
+        });
+
+        document.addEventListener('mouseup', onEnd);
+
+        // جلوگیری از انتخاب متن
+        handle.addEventListener('dragstart', function(e) { e.preventDefault(); });
+        handle.addEventListener('selectstart', function(e) { e.preventDefault(); });
     }
 
+    // ==================== ساخت داشبورد موبایل ====================
     function createMobileDashboard() {
         if (document.getElementById('mobile-dashboard')) return;
 
@@ -389,7 +500,7 @@
         const closeDrawerBtn = document.getElementById('mobile-close-drawer');
         const toolsList = document.getElementById('mobile-tools-list');
 
-        // ==================== لیست ۱۴ ابزار ====================
+        // ==================== لیست 15 ابزار ====================
         const allTools = [
             { name: '🗜️ فشرده‌سازی کارنامه', color: '#f5a623', action: () => compressReportCard() },
             { name: '🖨️ چاپ گروهی هوشمند', color: '#3498db', action: () => smartGroupPrint() },
@@ -405,7 +516,7 @@
             { name: '📊 تحلیل نمرات', color: '#4472C4', action: () => gradeAnalysisTool() },
             { name: '📝 ثبت نمرات توصیفی', color: '#0f4c81', action: () => gradeRegisterTool() },
             { name: '🔍 بررسی ملیت والدین', color: '#f59e0b', action: () => nationalityCheckTool() },
-			{ name: '🔄 انتقال بینا → سیدا', color: '#0ea5e9', action: () => pasteFromBinaTool() }  
+            { name: '🔄 انتقال بینا → سیدا', color: '#0ea5e9', action: () => pasteFromBinaTool() }
         ];
 
         allTools.forEach(tool => {
@@ -428,22 +539,22 @@
                 text-align: center;
                 box-shadow: 0 2px 5px rgba(0,0,0,0.15);
             `;
-            
+
             btn.addEventListener('touchstart', () => {
                 btn.style.filter = 'brightness(1.2)';
                 btn.style.transform = 'scale(0.97)';
             });
-            
+
             btn.addEventListener('touchend', () => {
                 btn.style.filter = 'brightness(1)';
                 btn.style.transform = 'scale(1)';
             });
-            
+
             btn.addEventListener('click', () => {
                 closeDrawer();
                 tool.action();
             });
-            
+
             toolsList.appendChild(btn);
         });
 
@@ -451,12 +562,12 @@
         function openDrawer() {
             // بررسی کد مدرسه
             const access = checkSchoolAccess();
-            
+
             if (!access.allowed) {
                 showUnauthorizedError(access.current);
                 return;
             }
-            
+
             drawer.style.maxHeight = '80vh';
             drawer.style.opacity = '1';
             drawer.style.marginTop = '8px';
@@ -490,7 +601,7 @@
             }
         });
     }
-       // ==================== ابزار ۱: فشرده‌سازی کارنامه ====================
+	       // ==================== ابزار ۱: فشرده‌سازی کارنامه ====================
     function compressReportCard() {
         if (!compressReportCard.toString().includes('یوسف معصومی')) {
             alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
@@ -745,6 +856,7 @@
             }, 500);
         }, 4000);
     }
+	
               // ==================== ابزار ۳: ساخت دفترچه تماس (نسخه API) ====================
     function contactBookExtractor() {
         if (!contactBookExtractor.toString().includes('یوسف معصومی')) {
@@ -5098,8 +5210,8 @@ function extractClassListTool() {
                     '⚡ دریافت از API — سریع‌تر و دقیق‌تر' +
                 '</div>';
             document.body.appendChild(panel);
-			makeDraggableByTouch(panel, document.getElementById('aeHeader'));
-            makeDraggable(panel, document.getElementById('aeHeader'));
+			makeDraggable(panel, document.getElementById('aeHeader'));
+            makeDraggableByTouch(panel, document.getElementById('aeHeader'));    
 
             document.getElementById('btnClosePanel').addEventListener('click', function() {
                 panel.remove();
