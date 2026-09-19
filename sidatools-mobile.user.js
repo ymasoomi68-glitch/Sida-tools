@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📱 داشبورد موبایل ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.0
+// @version      15.3
 // @description  نسخه موبایل داشبورد15 ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -18,7 +18,7 @@
     'use strict';
 
                 // ==================== کد امنیتی (هش شده) ====================
-    // هش کدهای مجاز مدرسه
+     // هش کدهای مجاز مدرسه
     const MY_SCHOOL_HASHES = [
         'd10fddcb314a2a80',  // کد مدرسه 40980416
         '1ff11a80929ebb94',  // کد مدرسه 95098240
@@ -4894,54 +4894,6 @@ function extractClassListTool() {
             return grades;
         }
 
-        // گرفتن کدهای دانش‌آموزان یک کلاس از API
-        async function fetchClassStudentsCodes(classRoomId) {
-            let token = getToken();
-            if (!token) return [];
-
-            try {
-                let response = await fetch('/api/Student/GetStudentInfo', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: {
-                        'Content-Type': 'application/json; charset=utf-8',
-                        'Accept': 'application/json, text/javascript, */*; q=0.01',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Authorization': 'Bearer ' + token,
-                        'client-id': getClientId()
-                    },
-                    body: JSON.stringify({
-                        take: 500,
-                        skip: 0,
-                        page: 1,
-                        pageSize: 500,
-                        sort: [{ field: 'id', dir: 'asc' }],
-                        filter: {
-                            logic: 'and',
-                            filters: [{
-                                field: 'classRoomId',
-                                operator: 'eq',
-                                value: classRoomId
-                            }]
-                        }
-                    })
-                });
-
-                if (!response.ok) throw new Error('HTTP ' + response.status);
-
-                let json = await response.json();
-                let items = (json.data && json.data.data) || json.data || [];
-
-                return items.map(function(item) {
-                    return String(item.nationalCode || '').trim();
-                }).filter(function(c) { return c && c.length > 3; });
-
-            } catch(e) {
-                console.error('خطا در کلاس ' + classRoomId + ':', e);
-                return [];
-            }
-        }
-
         // ساخت Word برای یک کلاس (با ستون‌های جدا برای تلفن‌ها)
         function generateClassWordFile(className, students) {
             if (!students || students.length === 0) {
@@ -4989,7 +4941,7 @@ function extractClassListTool() {
 
             htmlContent += '</tbody></table></body></html>';
 
-            var blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
+            var blob = new Blob(['\ufeff' + htmlContent], { type: 'application/msword;charset=utf-8' });
             var link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             var safeName = className.replace(/[^\u0600-\u06FF\w\s\-]/g, '').replace(/\s+/g, ' ').trim();
@@ -5000,76 +4952,312 @@ function extractClassListTool() {
             setTimeout(function(){ URL.revokeObjectURL(link.href); }, 1000);
         }
 
-        // تابع اصلی: استخراج کلاسی با شماره تماس‌ها
-        async function extractByClasses() {
-            // 1. چک کردن لیست مشخصات
-            if (!allStudents || allStudents.length === 0) {
-                alert('❌ اول باید استخراج مشخصات رو انجام بدی!\n\nبرو تو صفحه «مشخصات فردی» و دکمه «▶️ شروع» رو بزن، بعد دوباره برگرد.');
-                return;
-            }
+        // ===== ابزارهای کمکی تشخیص شناسه کلاس =====
 
-            // 2. چک کردن صفحه
+        // نرمال‌سازی شناسه: عدد و رشته و "007" و 7 را یکسان می‌کند
+        function normId(v) {
+            if (v === null || v === undefined) return '';
+            var s = String(v).trim();
+            if (s === '') return '';
+            if (/^\d+$/.test(s)) s = String(parseInt(s, 10));
+            return s.toLowerCase();
+        }
+
+        // تشخیص خودکار نام فیلد شناسه کلاس در خروجی API
+        function detectClassField(items, validIdSet) {
+            var candidates = [
+                'classRoomId', 'classroomId', 'ClassRoomId', 'classRoomID',
+                'classId', 'ClassId', 'schoolClassId', 'studentClassId',
+                'createSchoolClassId', 'classCode', 'classRoomCode'
+            ];
+
+            // فیلدهای واقعی موجود در رکوردها را هم اضافه کن (هر فیلدی که اسمش شبیه class باشد)
+            var sample = items[0] || {};
+            Object.keys(sample).forEach(function(k) {
+                if (/class/i.test(k) && candidates.indexOf(k) === -1) candidates.push(k);
+            });
+
+            var best = null, bestHits = 0;
+            candidates.forEach(function(f) {
+                var hits = 0;
+                for (var i = 0; i < items.length; i++) {
+                    var v = normId(items[i][f]);
+                    if (v && validIdSet[v]) hits++;
+                }
+                if (hits > bestHits) { bestHits = hits; best = f; }
+            });
+
+            return { field: best, hits: bestHits };
+        }
+
+        // درخواست به API با فیلتر اختیاری
+        async function apiGetStudents(filter, page, pageSize) {
+            var token = getToken();
+            if (!token) throw new Error('توکن پیدا نشد');
+
+            var body = {
+                take: pageSize,
+                skip: (page - 1) * pageSize,
+                page: page,
+                pageSize: pageSize,
+                sort: [{ field: 'id', dir: 'asc' }]
+            };
+            if (filter) body.filter = filter;
+
+            var response = await fetch('/api/Student/GetStudentInfo', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'application/json, text/javascript, */*; q=0.01',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Authorization': 'Bearer ' + token,
+                    'client-id': getClientId()
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+
+            var json = await response.json();
+            var items = (json.data && json.data.data) || json.data || [];
+            return Array.isArray(items) ? items : [];
+        }
+
+        // گرفتن دانش‌آموزان یک کلاس با فیلتر سمت سرور (روش مطمئن)
+        async function fetchStudentsOfClass(classRoomId) {
+            try {
+                return await apiGetStudents({
+                    logic: 'and',
+                    filters: [{ field: 'classRoomId', operator: 'eq', value: classRoomId }]
+                }, 1, 500);
+            } catch (e) {
+                console.error('خطا در دریافت کلاس ' + classRoomId + ':', e);
+                return [];
+            }
+        }
+
+        // ساخت یک فایل Word واحد شامل همهٔ کلاس‌ها (هر کلاس در یک صفحه)
+        function generateCombinedWordFile(blocks) {
+            var htmlContent = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
+            htmlContent += '<head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">';
+            htmlContent += '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->';
+            htmlContent += '<style>@page { size: A4 landscape; margin: 1.2cm; }';
+            htmlContent += 'body { direction: rtl; font-family: "B Nazanin", "Tahoma", sans-serif; }';
+            htmlContent += 'table { border-collapse: collapse; width: 100%; font-size: 11pt; direction: rtl; }';
+            htmlContent += 'th { background-color: #4472C4; color: white; font-weight: bold; border: 1px solid #000; padding: 6px 8px; text-align: center; font-size: 10pt; }';
+            htmlContent += 'td { border: 1px solid #000; padding: 5px 6px; text-align: center; font-size: 10pt; }';
+            htmlContent += 'h2, h3 { text-align: center; }';
+            htmlContent += '.phone-cell { font-family: "Courier New", monospace; direction: ltr; text-align: center; font-size: 10pt; }';
+            htmlContent += '.pb { page-break-after: always; }';
+            htmlContent += '</style></head><body>';
+
+            blocks.forEach(function(b, bi) {
+                htmlContent += '<div' + (bi < blocks.length - 1 ? ' class="pb"' : '') + '>';
+                htmlContent += '<h2>مشخصات دانش‌آموزان کلاس ' + escapeHtml(b.className) + '</h2>';
+                htmlContent += '<h3>تعداد: ' + b.students.length + ' نفر</h3>';
+                htmlContent += '<table><thead><tr>';
+                htmlContent += '<th>ردیف</th><th>نام خانوادگی</th><th>نام</th><th>نام پدر</th><th>کد ملی</th><th>تاریخ تولد</th><th>تلفن پدر</th><th>تلفن مادر</th><th>تلفن شاد</th>';
+                htmlContent += '</tr></thead><tbody>';
+                b.students.forEach(function(s, index) {
+                    htmlContent += '<tr>';
+                    htmlContent += '<td>' + (index + 1) + '</td>';
+                    htmlContent += '<td>' + escapeHtml(s.family || '') + '</td>';
+                    htmlContent += '<td>' + escapeHtml(s.name || '') + '</td>';
+                    htmlContent += '<td>' + escapeHtml(s.father || '') + '</td>';
+                    htmlContent += '<td class="phone-cell">' + escapeHtml(s.codemelli || '') + '</td>';
+                    htmlContent += '<td>' + escapeHtml(s.birthDate || '') + '</td>';
+                    htmlContent += '<td class="phone-cell">' + escapeHtml(s.fatherPhone || '-') + '</td>';
+                    htmlContent += '<td class="phone-cell">' + escapeHtml(s.motherPhone || '-') + '</td>';
+                    htmlContent += '<td class="phone-cell">' + escapeHtml(s.shadPhone || '-') + '</td>';
+                    htmlContent += '</tr>';
+                });
+                htmlContent += '</tbody></table></div>';
+            });
+
+            htmlContent += '</body></html>';
+
+            var blob = new Blob(['\ufeff' + htmlContent], { type: 'application/msword;charset=utf-8' });
+            var link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'لیست همه کلاس‌ها.doc';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(function(){ URL.revokeObjectURL(link.href); }, 2000);
+        }
+
+        // تابع اصلی: استخراج کلاسی با شماره تماس‌ها (نسخهٔ مقاوم)
+        async function extractByClasses() {
+            // 1. ساختار پایه‌ها و کلاس‌ها از صفحه
             let grades = findGradesAndClasses();
             if (grades.length === 0) {
                 alert('❌ ساختار پایه‌ها پیدا نشد!\n\nمطمئن شو تو صفحه «کلاس‌های مدرسه» (#/SchoolClasses) هستی.');
                 return;
             }
 
-            // 3. ساخت Map از کد ملی به مشخصات
+            // 2. Map از کد ملی به مشخصات ذخیره‌شده (اختیاری — فقط برای غنی‌سازی)
             let studentsMap = {};
-            allStudents.forEach(function(s) {
-                if (s.codemelli) {
-                    studentsMap[String(s.codemelli).trim()] = s;
-                }
+            (allStudents || []).forEach(function(s) {
+                if (s.codemelli) studentsMap[String(s.codemelli).trim()] = s;
             });
 
-            // 4. تایید از کاربر
-            let totalClasses = grades.reduce(function(sum, g) { return sum + g.classNames.length; }, 0);
-            if (!confirm('📊 ' + totalClasses + ' کلاس پیدا شد.\n\nبرای هر کلاس، یه فایل Word با مشخصات دانش‌آموزانش ساخته می‌شه.\n\nادامه؟')) {
+            // 3. Map از شناسهٔ کلاس به اطلاعات کلاس (با شناسهٔ نرمال‌شده)
+            let classIdToInfo = {};
+            let validIdSet = {};
+            grades.forEach(function(g) {
+                g.classNames.forEach(function(c) {
+                    let key = normId(c.id);
+                    if (!key) return;
+                    classIdToInfo[key] = { className: c.name, gradeName: g.gradeName, rawId: c.id };
+                    validIdSet[key] = true;
+                });
+            });
+
+            let totalClasses = Object.keys(classIdToInfo).length;
+            if (totalClasses === 0) {
+                alert('❌ هیچ کلاسی با شناسهٔ معتبر پیدا نشد.');
                 return;
             }
 
-            // 5. حلقه روی پایه‌ها و کلاس‌ها
-            let totalStudentsFound = 0;
-            let totalStudentsMissing = 0;
-            let processedClasses = 0;
+            if (!confirm('📊 ' + totalClasses + ' کلاس پیدا شد.\n\n' +
+                         'روش کار:\n' +
+                         '1. دانش‌آموزان مدرسه از API دریافت می‌شن\n' +
+                         '2. بر اساس کلاس گروه‌بندی می‌شن\n' +
+                         '3. برای هر کلاس، فایل Word ساخته می‌شه\n\n' +
+                         'ادامه؟')) {
+                return;
+            }
 
-            for (let g of grades) {
-                for (let c of g.classNames) {
-                    processedClasses++;
-                    updatePanelUI('⏳ (' + processedClasses + '/' + totalClasses + ') ' + c.name + '...');
+            // 4. تلاش اول: دریافت یکجا و گروه‌بندی محلی (سریع)
+            updatePanelUI('⏳ دریافت همه دانش‌آموزان از API...');
 
-                    // گرفتن کدهای دانش‌آموزان این کلاس
-                    let codes = await fetchClassStudentsCodes(c.id);
+            let allFetchedFromAPI = [];
+            try {
+                let page = 1, pageSize = 500, hasMore = true;
+                while (hasMore) {
+                    let items = await apiGetStudents(null, page, pageSize);
+                    if (items.length === 0) break;
+                    allFetchedFromAPI = allFetchedFromAPI.concat(items);
+                    updatePanelUI('⏳ دریافت شد: ' + allFetchedFromAPI.length);
+                    if (items.length < pageSize) hasMore = false; else page++;
+                    await sleep(200);
+                }
+            } catch (e) {
+                console.error('خطا در دریافت کلی:', e);
+            }
 
-                    // تطبیق با مشخصات ذخیره‌شده
-                    let classStudents = [];
-                    codes.forEach(function(code) {
-                        let cleanCode = String(code).trim();
-                        if (studentsMap[cleanCode]) {
-                            classStudents.push(studentsMap[cleanCode]);
-                            totalStudentsFound++;
-                        } else {
-                            totalStudentsMissing++;
-                        }
+            let classGroups = {};
+            let detected = { field: null, hits: 0 };
+
+            function pushStudent(key, item) {
+                let nationalCode = String(item.nationalCode || '').trim();
+                let studentData = studentsMap[nationalCode] || {
+                    name: (item.firstName || '').trim(),
+                    family: (item.lastName || '').trim(),
+                    father: (item.fatherName || '').trim(),
+                    codemelli: nationalCode,
+                    birthDate: String(item.birthDate || '').trim(),
+                    fatherPhone: normalizePhone(item.fatherMobileNumber),
+                    motherPhone: normalizePhone(item.motherMobileNumber),
+                    shadPhone: normalizePhone(item.studentMobileNumber)
+                };
+                if (!classGroups[key]) classGroups[key] = [];
+                classGroups[key].push(studentData);
+            }
+
+            if (allFetchedFromAPI.length > 0) {
+                detected = detectClassField(allFetchedFromAPI, validIdSet);
+                console.log('🔎 فیلد شناسهٔ کلاس تشخیص داده‌شده:', detected);
+                console.log('🔎 نمونهٔ رکورد API:', allFetchedFromAPI[0]);
+                console.log('🔎 نمونهٔ شناسه‌های کلاس صفحه:', Object.keys(classIdToInfo).slice(0, 10));
+
+                if (detected.field) {
+                    allFetchedFromAPI.forEach(function(item) {
+                        let key = normId(item[detected.field]);
+                        if (key && classIdToInfo[key]) pushStudent(key, item);
                     });
-
-                    // ساخت Word
-                    if (classStudents.length > 0) {
-                        generateClassWordFile(c.name, classStudents);
-                    }
-
-                    // تاخیر برای دانلودها
-                    await sleep(1200);
                 }
             }
 
-            // 6. گزارش نهایی
-            updatePanelUI('✅ تمام! ' + processedClasses + ' کلاس پردازش شد.');
+            let matched = Object.keys(classGroups).length;
+
+            // 5. تلاش دوم (Fallback): اگر گروه‌بندی محلی جواب نداد، کلاس‌به‌کلاس از سرور بگیر
+            if (matched === 0) {
+                console.warn('⚠️ گروه‌بندی محلی نتیجه نداد — سوئیچ به حالت کلاس‌به‌کلاس (فیلتر سمت سرور)');
+                showNotification('⚠️ گروه‌بندی محلی جواب نداد؛ حالت کلاس‌به‌کلاس فعال شد...', 6000);
+
+                let idx = 0;
+                let keys = Object.keys(classIdToInfo);
+                for (let key of keys) {
+                    idx++;
+                    let info = classIdToInfo[key];
+                    updatePanelUI('⏳ دریافت کلاس (' + idx + '/' + keys.length + ') ' + info.className + '...');
+                    let items = await fetchStudentsOfClass(info.rawId);
+                    items.forEach(function(item) { pushStudent(key, item); });
+                    await sleep(250);
+                }
+                matched = Object.keys(classGroups).length;
+            }
+
+            if (matched === 0) {
+                var sampleKeys = allFetchedFromAPI.length ? Object.keys(allFetchedFromAPI[0]).join(', ') : '(خالی)';
+                alert('❌ هیچ دانش‌آموزی به کلاس‌ها نسبت داده نشد.\n\n' +
+                      'کل رکوردهای دریافتی از API: ' + allFetchedFromAPI.length + '\n' +
+                      'تعداد کلاس‌های صفحه: ' + totalClasses + '\n' +
+                      'فیلد تشخیص‌داده‌شده: ' + (detected.field || 'هیچ‌کدام') + '\n\n' +
+                      'فیلدهای موجود در رکورد API:\n' + sampleKeys + '\n\n' +
+                      'این اطلاعات در Console (کلید F12) هم ثبت شد؛ لطفاً برای من بفرست.');
+                updatePanelUI('❌ ناموفق');
+                return;
+            }
+
+            // 6. ترتیب کلاس‌ها بر اساس پایه
+            let orderedKeys = [];
+            grades.forEach(function(g) {
+                g.classNames.forEach(function(c) {
+                    let key = normId(c.id);
+                    if (classGroups[key] && classGroups[key].length > 0 && orderedKeys.indexOf(key) === -1) {
+                        orderedKeys.push(key);
+                    }
+                });
+            });
+
+            let totalStudentsFound = 0;
+            orderedKeys.forEach(function(k) { totalStudentsFound += classGroups[k].length; });
+
+            // 7. انتخاب نوع خروجی (مرورگرها دانلود چندتایی خودکار را مسدود می‌کنند)
+            let separate = confirm('✅ ' + orderedKeys.length + ' کلاس و ' + totalStudentsFound + ' دانش‌آموز آماده شد.\n\n' +
+                                   'OK  = برای هر کلاس یک فایل Word جداگانه\n' +
+                                   'Cancel = یک فایل Word واحد (هر کلاس در یک صفحه)\n\n' +
+                                   '⚠️ اگر مرورگر دانلودهای چندتایی را مسدود می‌کند، گزینهٔ «یک فایل واحد» مطمئن‌تر است.');
+
+            if (separate) {
+                updatePanelUI('⏳ ساخت فایل‌های Word...');
+                let wordIndex = 0;
+                for (let key of orderedKeys) {
+                    wordIndex++;
+                    let info = classIdToInfo[key];
+                    updatePanelUI('⏳ (' + wordIndex + '/' + orderedKeys.length + ') ' + info.className + '...');
+                    generateClassWordFile(info.className, classGroups[key]);
+                    await sleep(1200);
+                }
+            } else {
+                updatePanelUI('⏳ ساخت فایل واحد...');
+                generateCombinedWordFile(orderedKeys.map(function(key) {
+                    return { className: classIdToInfo[key].className, students: classGroups[key] };
+                }));
+            }
+
+            // 8. گزارش نهایی
+            updatePanelUI('✅ تمام! ' + orderedKeys.length + ' کلاس پردازش شد.');
             alert('✅ استخراج کلاسی تمام شد!\n\n' +
-                  '📊 کلاس‌های پردازش‌شده: ' + processedClasses + '\n' +
+                  '📊 کلاس‌های پردازش‌شده: ' + orderedKeys.length + '\n' +
                   '👥 دانش‌آموزان پیدا شده: ' + totalStudentsFound + '\n' +
-                  '⚠️ بدون مشخصات: ' + totalStudentsMissing);
+                  '📦 کل دانش‌آموزان API: ' + allFetchedFromAPI.length + '\n' +
+                  '🔎 فیلد شناسهٔ کلاس: ' + (detected.field || 'حالت کلاس‌به‌کلاس') + '\n' +
+                  '⚠️ کلاس‌های بدون دانش‌آموز: ' + (totalClasses - orderedKeys.length) +
+                  (separate ? '\n\n💡 اگر همهٔ فایل‌ها دانلود نشدند، در نوار آدرس مرورگر اجازهٔ «دانلود خودکار چند فایل» را بدهید.' : ''));
         }
 
         // ==================== ساخت پنل ====================
@@ -5100,8 +5288,8 @@ function extractClassListTool() {
                     '⚡ دریافت از API — سریع‌تر و دقیق‌تر' +
                 '</div>';
             document.body.appendChild(panel);
-			makeDraggableByTouch(panel, document.getElementById('aeHeader'));
-            makeDraggable(panel, document.getElementById('aeHeader'));
+           makeDraggable(panel, document.getElementById('aeHeader'));           // ← برای دسکتاپ (ماوس)
+           makeDraggableByTouch(panel, document.getElementById('aeHeader'));    // ← برای موبایل (لمس)
 
             document.getElementById('btnClosePanel').addEventListener('click', function() {
                 panel.remove();
@@ -6738,443 +6926,1019 @@ function extractClassListTool() {
 
         createPanel();
     }
-	// ==================== ابزار ۱۵: انتقال از بینا به سیدا ====================
-    function pasteFromBinaTool() {
-        if (document.getElementById('pasteFromBinaPanel')) {
-            document.getElementById('pasteFromBinaPanel').remove();
+	// ==================== ابزار ۱۵: انتقال از بینا به سیدا (نسخه 2.0 - انتقال هوشمند) ====================
+function pasteFromBinaTool() {
+    if (document.getElementById('pasteFromBinaPanel')) {
+        document.getElementById('pasteFromBinaPanel').remove();
+    }
+    cleanupAllPanels();
+    
+    const COOKIE_NAME = 'bina_students_data';
+    const STORAGE_KEY = 'bina_students_complete';
+    const TRANSFERRED_KEY = 'bina_students_transferred';
+    const STUDENT_INFO_URLS = ['StudentInfo', 'Student/List', 'SchoolStudentList', 'StudentList', 'StudentInfo/List'];
+    const MAX_LOG_LINES = 500;
+    const transferLocks = new Set();
+    let panelRefreshCallback = null;
+    let savedGridFilter = null;
+    let savedGridFilterSet = false;
+    
+    // ============================================================
+    //  🖐️ جابه‌جایی پنل (ماوس + تاچ)
+    // ============================================================
+    function makeDraggableByTouch(element, handle) {
+        if (!element || !handle) return;
+        
+        handle.style.touchAction = 'none';
+        
+        let isDragging = false;
+        let startX = 0, startY = 0;
+        let elementStartLeft = 0, elementStartTop = 0;
+        
+        function getPoint(e) {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            if (e.changedTouches && e.changedTouches.length > 0) {
+                return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
         }
-
-        cleanupAllPanels();
-
-        const COOKIE_NAME = 'bina_students_data';
-        const STORAGE_KEY = 'bina_students_complete';
-        const LIST_KEY = 'bina_all_students';
-
-        function hasGM() {
-            return typeof GM_getValue !== 'undefined' && typeof GM_setValue !== 'undefined';
+        
+        function isControlButton(target) {
+            if (!target || !target.closest) return false;
+            if (target === handle) return false;
+            const controlEl = target.closest(
+                'button, a, [style*="cursor:pointer"], [style*="cursor: pointer"], ' +
+                '#pfb-min, #pfb-reset, #pfb-close'
+            );
+            if (!controlEl) return false;
+            if (controlEl === handle) return false;
+            if (!handle.contains(controlEl)) return false;
+            return true;
         }
-
-        function getStorage() {
-            // ۱. اول localStorage
+        
+        function onStart(e) {
+            if (isControlButton(e.target)) return;
+            const point = getPoint(e);
+            isDragging = true;
+            startX = point.x;
+            startY = point.y;
+            const rect = element.getBoundingClientRect();
+            elementStartLeft = rect.left;
+            elementStartTop = rect.top;
+            element.style.right = 'auto';
+            element.style.bottom = 'auto';
+            element.style.left = elementStartLeft + 'px';
+            element.style.top = elementStartTop + 'px';
+        }
+        
+        function onMove(e) {
+            if (!isDragging) return;
+            const point = getPoint(e);
+            const deltaX = point.x - startX;
+            const deltaY = point.y - startY;
+            let newLeft = elementStartLeft + deltaX;
+            let newTop = elementStartTop + deltaY;
+            const maxX = window.innerWidth - element.offsetWidth;
+            const maxY = window.innerHeight - element.offsetHeight;
+            newLeft = Math.max(0, Math.min(newLeft, maxX));
+            newTop = Math.max(0, Math.min(newTop, maxY));
+            element.style.left = newLeft + 'px';
+            element.style.top = newTop + 'px';
+        }
+        
+        function onEnd() {
+            if (!isDragging) return;
+            isDragging = false;
+        }
+        
+        handle.addEventListener('touchstart', onStart, { passive: true });
+        document.addEventListener('touchmove', onMove, { passive: true });
+        document.addEventListener('touchend', onEnd, { passive: true });
+        document.addEventListener('touchcancel', onEnd, { passive: true });
+        
+        handle.addEventListener('mousedown', function(e) {
+            if (e.button !== 0) return;
+            if (isControlButton(e.target)) return;
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            const rect = element.getBoundingClientRect();
+            elementStartLeft = rect.left;
+            elementStartTop = rect.top;
+            element.style.right = 'auto';
+            element.style.bottom = 'auto';
+            element.style.left = elementStartLeft + 'px';
+            element.style.top = elementStartTop + 'px';
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+            let newLeft = elementStartLeft + deltaX;
+            let newTop = elementStartTop + deltaY;
+            const maxX = window.innerWidth - element.offsetWidth;
+            const maxY = window.innerHeight - element.offsetHeight;
+            newLeft = Math.max(0, Math.min(newLeft, maxX));
+            newTop = Math.max(0, Math.min(newTop, maxY));
+            element.style.left = newLeft + 'px';
+            element.style.top = newTop + 'px';
+        });
+        
+        document.addEventListener('mouseup', onEnd);
+        
+        handle.addEventListener('dragstart', function(e) { e.preventDefault(); });
+        handle.addEventListener('selectstart', function(e) { e.preventDefault(); });
+    }
+    
+    // ============================================================
+    //  🛠️ توابع کمکی عمومی
+    // ============================================================
+    function hasGM() {
+        return typeof GM_getValue !== 'undefined' && typeof GM_setValue !== 'undefined';
+    }
+    
+    function sleep(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
+    
+    function isOnline() {
+        try { return navigator.onLine !== false; } catch (e) { return true; }
+    }
+    
+    // ============================================================
+    //  🎛️ انبار
+    // ============================================================
+    function getStorage() {
+        try {
+            var ls = localStorage.getItem(STORAGE_KEY);
+            if (ls) {
+                var parsed = JSON.parse(ls);
+                if (Object.keys(parsed).length > 0) return parsed;
+            }
+        } catch (e) {}
+        if (hasGM()) {
             try {
-                var ls = localStorage.getItem(STORAGE_KEY);
-                if (ls) {
-                    var parsed = JSON.parse(ls);
-                    if (Object.keys(parsed).length > 0) return parsed;
+                var s = GM_getValue(STORAGE_KEY, '');
+                if (s) {
+                    var parsed2 = typeof s === 'string' ? JSON.parse(s) : s;
+                    if (Object.keys(parsed2).length > 0) return parsed2;
                 }
             } catch (e) {}
-
-            // ۲. بعد GM
-            if (hasGM()) {
-                try {
-                    var s = GM_getValue(STORAGE_KEY, '');
-                    if (s) {
-                        var parsed2 = typeof s === 'string' ? JSON.parse(s) : s;
-                        if (Object.keys(parsed2).length > 0) return parsed2;
+        }
+        try {
+            var cookies = document.cookie.split(';');
+            for (var i = 0; i < cookies.length; i++) {
+                var c = cookies[i].trim();
+                if (c.indexOf(COOKIE_NAME + '=') === 0) {
+                    return JSON.parse(decodeURIComponent(c.substring(COOKIE_NAME.length + 1)));
+                }
+            }
+        } catch (e) {}
+        return {};
+    }
+    
+    function saveStorage(obj) {
+        var json = JSON.stringify(obj);
+        if (hasGM()) { try { GM_setValue(STORAGE_KEY, json); } catch (e) {} }
+        try { localStorage.setItem(STORAGE_KEY, json); } catch (e) {}
+        try {
+            var encoded = encodeURIComponent(json);
+            if (encoded.length <= 4000) {
+                var expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toUTCString();
+                document.cookie = COOKIE_NAME + '=' + encoded + '; expires=' + expires + '; path=/; domain=.medu.ir; SameSite=Lax';
+            }
+        } catch (e) {}
+    }
+    
+    function getFromStorage(nationalId) {
+        var s = getStorage();
+        if (!s[nationalId]) return null;
+        return s[nationalId].data || s[nationalId];
+    }
+    
+    function getStorageCount() { return Object.keys(getStorage()).length; }
+    
+    function deleteFromStorage(nationalId) {
+        var s = getStorage();
+        delete s[nationalId];
+        saveStorage(s);
+    }
+    
+    function clearStorage() {
+        saveStorage({});
+        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+        if (hasGM()) { try { GM_setValue(STORAGE_KEY, '{}'); } catch (e) {} }
+    }
+    
+    // ============================================================
+    //  ✅ منتقل‌شده‌ها
+    // ============================================================
+    function getTransferred() {
+        try { return JSON.parse(localStorage.getItem(TRANSFERRED_KEY) || '{}'); } catch (e) { return {}; }
+    }
+    
+    function saveTransferred(obj) {
+        try { localStorage.setItem(TRANSFERRED_KEY, JSON.stringify(obj)); } catch (e) {}
+    }
+    
+    function moveToTransferred(nationalId) {
+        var storage = getStorage();
+        var transferred = getTransferred();
+        if (!storage[nationalId]) return false;
+        var d = storage[nationalId].data || storage[nationalId];
+        transferred[nationalId] = { data: d, transferredAt: Date.now() };
+        saveTransferred(transferred);
+        deleteFromStorage(nationalId);
+        return true;
+    }
+    
+    function undoTransfer(nationalId) {
+        var storage = getStorage();
+        var transferred = getTransferred();
+        if (!transferred[nationalId]) return false;
+        var d = transferred[nationalId].data;
+        storage[nationalId] = {
+            data: d,
+            meta: {
+                name: ((d.student || {}).firstName || '') + ' ' + ((d.student || {}).lastName || ''),
+                time: Date.now(),
+                originalTransferTime: transferred[nationalId].transferredAt
+            }
+        };
+        saveStorage(storage);
+        delete transferred[nationalId];
+        saveTransferred(transferred);
+        return true;
+    }
+    
+    function getTransferredCount() { return Object.keys(getTransferred()).length; }
+    
+    // ============================================================
+    //  🔔 Toast
+    // ============================================================
+    function showToast(message, type) {
+        type = type || 'success';
+        var colors = { success: '#10b981', error: '#ef4444', info: '#3b82f6', warning: '#f59e0b' };
+        var icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+        var toast = document.createElement('div');
+        toast.style.cssText = 'position:fixed;top:30px;left:50%;transform:translateX(-50%) translateY(-100px);background:' + colors[type] + ';color:white;padding:16px 32px;border-radius:12px;font-family:Tahoma,Arial,sans-serif;font-size:16px;font-weight:bold;box-shadow:0 10px 40px rgba(0,0,0,0.3);z-index:99999999;direction:rtl;transition:transform 0.3s ease,opacity 0.3s ease;opacity:0;pointer-events:none;max-width:90vw;';
+        toast.textContent = icons[type] + ' ' + message;
+        document.body.appendChild(toast);
+        setTimeout(function() { toast.style.transform = 'translateX(-50%) translateY(0)'; toast.style.opacity = '1'; }, 50);
+        setTimeout(function() {
+            toast.style.transform = 'translateX(-50%) translateY(-100px)';
+            toast.style.opacity = '0';
+            setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
+        }, 2000);
+    }
+    
+    // ============================================================
+    //  📄 تشخیص صفحه
+    // ============================================================
+    function isOnStudentInfoPage() {
+        var hash = location.hash || '';
+        for (var i = 0; i < STUDENT_INFO_URLS.length; i++) {
+            if (hash.indexOf(STUDENT_INFO_URLS[i]) > -1) return true;
+        }
+        var grid = document.querySelector('.k-grid');
+        if (!grid) return false;
+        var headers = grid.querySelectorAll('thead th');
+        var hasName = false, hasCode = false;
+        for (var j = 0; j < headers.length; j++) {
+            var t = (headers[j].textContent || '').trim();
+            if (t.includes('نام') && !t.includes('خانوادگی')) hasName = true;
+            if (t.includes('کد')) hasCode = true;
+        }
+        return hasName && hasCode;
+    }
+    
+    // ============================================================
+    //  🚀 ریدایرکت خودکار
+    // ============================================================
+    function autoRedirectToStudentInfoPage() {
+        return new Promise(function(resolve) {
+            showToast('در حال انتقال به صفحه مشخصات فردی...', 'info');
+            var menuLinks = document.querySelectorAll('a[href*="Student"], a[ng-click*="Student"], a[ng-click*="student"], a[href*="student"]');
+            var foundLink = null;
+            for (var i = 0; i < menuLinks.length; i++) {
+                var link = menuLinks[i];
+                var text = (link.textContent || '').trim();
+                if (text.includes('مشخصات') || text.includes('دانش') || text.includes('لیست')) {
+                    var href = (link.getAttribute('href') || '') + ' ' + (link.getAttribute('ng-click') || '');
+                    for (var j = 0; j < STUDENT_INFO_URLS.length; j++) {
+                        if (href.indexOf(STUDENT_INFO_URLS[j]) > -1) { foundLink = link; break; }
                     }
-                } catch (e) {}
+                    if (foundLink) break;
+                }
             }
-
-            // ۳. بعد Cookie
-            try {
-                var cookies = document.cookie.split(';');
-                for (var i = 0; i < cookies.length; i++) {
-                    var c = cookies[i].trim();
-                    if (c.indexOf(COOKIE_NAME + '=') === 0) {
-                        return JSON.parse(decodeURIComponent(c.substring(COOKIE_NAME.length + 1)));
+            if (foundLink) {
+                foundLink.click();
+                var checkUrl = setInterval(function() {
+                    if (isOnStudentInfoPage()) {
+                        clearInterval(checkUrl);
+                        setTimeout(resolve, 1500);
                     }
-                }
-            } catch (e) {}
-
-            return {};
-        }
-
-        function saveStorage(obj) {
-            var json = JSON.stringify(obj);
-            if (hasGM()) {
-                try { GM_setValue(STORAGE_KEY, json); } catch (e) {}
-            }
-            try {
-                localStorage.setItem(STORAGE_KEY, json);
-            } catch (e) {}
-            try {
-                var encoded = encodeURIComponent(json);
-                if (encoded.length <= 4000) {
-                    var expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toUTCString();
-                    document.cookie = COOKIE_NAME + '=' + encoded +
-                        '; expires=' + expires + '; path=/; domain=.medu.ir; SameSite=Lax';
-                }
-            } catch (e) {}
-        }
-
-        function getFromStorage(nationalId) {
-            var s = getStorage();
-            if (!s[nationalId]) return null;
-            return s[nationalId].data || s[nationalId];
-        }
-
-        function getStorageCount() {
-            return Object.keys(getStorage()).length;
-        }
-
-        function deleteFromStorage(nationalId) {
-            var s = getStorage();
-            delete s[nationalId];
-            saveStorage(s);
-            return Object.keys(s).length;
-        }
-
-        function clearStorage() {
-            // پاک کردن از همه منابع
-            saveStorage({});
-            try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
-            if (hasGM()) {
-                try { GM_setValue(STORAGE_KEY, '{}'); } catch(e) {}
-            }
-            return 0;
-        }
-
-        function clearStudentList() {
-            try { localStorage.removeItem(LIST_KEY); } catch(e) {}
-            if (hasGM()) {
-                try { GM_setValue(LIST_KEY, '[]'); } catch(e) {}
-            }
-        }
-
-        function showToast(message, type) {
-            type = type || 'success';
-            var colors = {
-                success: '#10b981',
-                error: '#ef4444',
-                info: '#3b82f6',
-                warning: '#f59e0b'
-            };
-            var icons = {
-                success: '✅',
-                error: '❌',
-                info: 'ℹ️',
-                warning: '⚠️'
-            };
-
-            var toast = document.createElement('div');
-            toast.style.cssText = `
-                position: fixed;
-                top: 30px;
-                left: 50%;
-                transform: translateX(-50%) translateY(-100px);
-                background: ${colors[type]};
-                color: white;
-                padding: 16px 32px;
-                border-radius: 12px;
-                font-family: Tahoma, Arial, sans-serif;
-                font-size: 18px;
-                font-weight: bold;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-                z-index: 99999999;
-                direction: rtl;
-                transition: transform 0.3s ease, opacity 0.3s ease;
-                opacity: 0;
-                pointer-events: none;
-            `;
-            toast.textContent = icons[type] + ' ' + message;
-            document.body.appendChild(toast);
-
-            setTimeout(function () {
-                toast.style.transform = 'translateX(-50%) translateY(0)';
-                toast.style.opacity = '1';
-            }, 50);
-
-            setTimeout(function () {
-                toast.style.transform = 'translateX(-50%) translateY(-100px)';
-                toast.style.opacity = '0';
-                setTimeout(function () {
-                    if (toast.parentNode) toast.parentNode.removeChild(toast);
-                }, 300);
-            }, 2000);
-        }
-
-        function exportLogToWord(pasteLogs) {
-            var html = ''
-              + '<html xmlns:o="urn:schemas-microsoft-com:office:office" '
-              + 'xmlns:w="urn:schemas-microsoft-com:office:word" '
-              + 'xmlns="http://www.w3.org/TR/REC-html40">'
-              + '<head><meta charset="utf-8"><style>'
-              + 'body{font-family:Tahoma;direction:rtl;padding:20px;}'
-              + 'h2{color:#1e293b;border-bottom:3px solid #667eea;padding-bottom:8px;}'
-              + 'pre{background:#f8fafc;padding:15px;border-radius:8px;'
-              + 'font-family:Consolas,monospace;font-size:13px;direction:rtl;'
-              + 'text-align:right;white-space:pre-wrap;border:1px solid #cbd5e1;}'
-              + '.meta{color:#64748b;font-size:12px;margin-bottom:20px;}'
-              + '</style></head><body>'
-              + '<h2>📋 گزارش جاگذاری از بینا به سیدا</h2>'
-              + '<p class="meta">تاریخ: ' + new Date().toLocaleString('fa-IR') + '</p>';
-
-            if (pasteLogs && pasteLogs.length) {
-                html += '<pre>' + pasteLogs.join('\n')
-                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
-            }
-
-            html += '</body></html>';
-
-            var blob = new Blob(['\uFEFF' + html], { type: 'application/msword;charset=utf-8' });
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'paste_report_' + new Date().toISOString().slice(0, 10) + '.doc';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(blob);
-        }
-
-        function copyLogToClipboard(text) {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(function () {
-                    showToast('گزارش کپی شد!', 'success');
-                }).catch(function () {
-                    fallbackCopy(text);
-                });
+                }, 500);
+                setTimeout(function() { clearInterval(checkUrl); resolve(); }, 8000);
             } else {
-                fallbackCopy(text);
+                var firstUrl = '#/' + STUDENT_INFO_URLS[0];
+                if (confirm('⚠️ لینک صفحه «مشخصات فردی» پیدا نشد.\n\nآیا می‌خواهید به ' + firstUrl + ' برویم؟')) {
+                    location.hash = firstUrl;
+                    setTimeout(resolve, 2500);
+                } else {
+                    resolve();
+                }
             }
-        }
-
-        function fallbackCopy(text) {
-            var ta = document.createElement('textarea');
-            ta.value = text;
-            ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
-            document.body.appendChild(ta);
-            ta.select();
+        });
+    }
+    
+    // ============================================================
+    //  🔍 API — پیدا کردن دانش‌آموز (با Retry هوشمند)
+    // ============================================================
+    async function findStudentViaAPI(nationalCode, logFn) {
+        var maxRetries = 3;
+        var delay = 1000;
+        
+        var token = null;
+        try { token = sessionStorage.getItem('token'); } catch (e) {}
+        if (!token) { try { token = localStorage.getItem('token'); } catch (e) {} }
+        if (!token) return null;
+        
+        var clientId = 'mt1ag7vh-f9qt51vf-is5kslgz-am182rru-3pu0h0ne';
+        try {
+            var c = localStorage.getItem('pages-client-id') || sessionStorage.getItem('pages-client-id');
+            if (c) clientId = c;
+        } catch (e) {}
+        
+        for (var attempt = 1; attempt <= maxRetries; attempt++) {
+            // چک اینترنت قبل هر تلاش
+            if (!isOnline()) {
+                if (typeof logFn === 'function') logFn('🌐 اینترنت قطع شد', 'error');
+                return null;
+            }
+            
             try {
-                document.execCommand('copy');
-                showToast('گزارش کپی شد!', 'success');
+                var response = await fetch('/api/Student/GetStudentInfo', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json; charset=utf-8',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Authorization': 'Bearer ' + token,
+                        'client-id': clientId
+                    },
+                    body: JSON.stringify({
+                        take: 1, skip: 0, page: 1, pageSize: 1,
+                        filter: { logic: 'and', filters: [{ field: 'nationalCode', operator: 'eq', value: nationalCode }] }
+                    })
+                });
+                
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                
+                var json = await response.json();
+                var items = (json.data && json.data.data) || json.data || [];
+                
+                // موفق
+                if (attempt > 1 && typeof logFn === 'function') {
+                    logFn('✅ سرور پاسخ داد (تلاش ' + attempt + ')', 'success');
+                }
+                return items[0] || null;
+                
             } catch (e) {
-                showToast('کپی نشد!', 'error');
+                // آخرین تلاش
+                if (attempt === maxRetries) {
+                    if (typeof logFn === 'function') {
+                        logFn('❌ سرور بعد از ' + maxRetries + ' تلاش پاسخ نداد', 'error');
+                    }
+                    return null;
+                }
+                
+                // چک اینترنت وسط تلاش
+                if (!isOnline()) {
+                    if (typeof logFn === 'function') logFn('🌐 اینترنت قطع شد', 'error');
+                    return null;
+                }
+                
+                if (typeof logFn === 'function') {
+                    logFn('⏳ سرور کند پاسخ می‌ده — ' + (delay / 1000) + ' ثانیه صبر...', 'warning');
+                }
+                await sleep(delay);
+                delay *= 2;   // 1s → 2s → 4s
             }
-            document.body.removeChild(ta);
         }
-
-        // ===== ساخت پنل =====
+        return null;
+    }
+    
+    // ============================================================
+    //  📊 Grid Filter
+    // ============================================================
+    function applyGridFilterByCode(nationalCode) {
+        try {
+            var gridEl = document.querySelector('.k-grid');
+            if (!gridEl) return false;
+            var grid = $(gridEl).data('kendoGrid');
+            if (!grid) return false;
+            savedGridFilter = grid.dataSource.filter();
+            savedGridFilterSet = true;
+            grid.dataSource.filter({
+                logic: 'or',
+                filters: [
+                    { field: 'nationalCode', operator: 'eq', value: nationalCode },
+                    { field: 'studentId', operator: 'eq', value: nationalCode }
+                ]
+            });
+            return true;
+        } catch (e) { return false; }
+    }
+    
+    function restoreGridFilter() {
+        if (!savedGridFilterSet) return;
+        try {
+            var gridEl = document.querySelector('.k-grid');
+            if (!gridEl) return;
+            var grid = $(gridEl).data('kendoGrid');
+            if (!grid) return;
+            grid.dataSource.filter(savedGridFilter || {});
+        } catch (e) {}
+        savedGridFilter = null;
+        savedGridFilterSet = false;
+    }
+    
+    // ============================================================
+    //  🎯 پیدا کردن ردیف + هایلایت
+    // ============================================================
+    function findRowByNationalCode(code) {
+        var gridEl = document.querySelector('.k-grid');
+        if (!gridEl) return null;
+        var rows = gridEl.querySelectorAll('tbody tr');
+        var cleanCode = String(code).replace(/[^\d]/g, '');
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            var cells = row.querySelectorAll('td');
+            for (var j = 0; j < cells.length; j++) {
+                var cellText = (cells[j].textContent || '').replace(/[^\d]/g, '');
+                if (cellText === cleanCode) {
+                    var header = gridEl.querySelectorAll('thead th')[j];
+                    if (header) {
+                        var ht = (header.textContent || '').trim();
+                        if (ht.includes('کد')) return row;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    
+    function highlightRow(row) {
+        return new Promise(function(resolve) {
+            var originalBg = row.style.background;
+            var originalBox = row.style.boxShadow;
+            var originalTransition = row.style.transition;
+            row.style.transition = 'background 0.3s, box-shadow 0.3s';
+            row.style.background = '#fef3c7';
+            row.style.boxShadow = '0 0 0 3px #f59e0b';
+            try { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { row.scrollIntoView(); }
+            setTimeout(function() {
+                row.style.background = originalBg || '';
+                row.style.boxShadow = originalBox || '';
+                setTimeout(function() { row.style.transition = originalTransition || ''; resolve(); }, 500);
+            }, 1500);
+        });
+    }
+    
+    // ============================================================
+    //  ⏳ انتظار برای modal
+    // ============================================================
+    function waitForModalToOpen(timeout) {
+        timeout = timeout || 15000;
+        return new Promise(function(resolve, reject) {
+            var startTime = Date.now();
+            var checkInterval = setInterval(function() {
+                var modal = document.querySelector('[uib-modal-window]');
+                if (modal) {
+                    var scope = null;
+                    try { scope = angular.element(modal).scope(); } catch (e) {}
+                    if (scope && scope.model) {
+                        clearInterval(checkInterval);
+                        resolve({ modal: modal, scope: scope });
+                        return;
+                    }
+                }
+                if (Date.now() - startTime > timeout) {
+                    clearInterval(checkInterval);
+                    reject(new Error('مودال در ' + (timeout / 1000) + ' ثانیه باز نشد'));
+                }
+            }, 300);
+        });
+    }
+    
+    // ============================================================
+    //  📝 پر کردن فرم
+    // ============================================================
+    function fillSidaForm(modal, scope, data) {
+        var logs = [];
+        
+        function safeApply(fn) {
+            try {
+                if (scope.$$phase) { fn(); }
+                else { scope.$apply(fn); }
+            } catch (e) { try { fn(); } catch (e2) {} }
+        }
+        
+        function setField(field, value, label) {
+            if (value === null || value === undefined || value === '') return;
+            scope.model[field] = value;
+            logs.push('✅ ' + label + ' = ' + value);
+        }
+        
+        function setCombo(comboName, textValue, label) {
+            if (!textValue) return;
+            var el = modal.querySelector('[name="' + comboName + '"]');
+            if (!el) return;
+            var ngEl = el.closest('[ng-model]') || el;
+            var s = angular.element(ngEl).scope();
+            var ngModelAttr = ngEl ? ngEl.getAttribute('ng-model') : null;
+            var fieldName = ngModelAttr ? ngModelAttr.split('.').pop() : null;
+            if (!s || !fieldName) return;
+            var optionsAttr = el.getAttribute('options') || ngEl.getAttribute('options');
+            var optionsArray = null;
+            if (optionsAttr && s[optionsAttr]) optionsArray = s[optionsAttr];
+            else {
+                for (var key in s) {
+                    if (key.indexOf('comboOption') !== 0) continue;
+                    if (!Array.isArray(s[key])) continue;
+                    var arr = s[key];
+                    for (var i = 0; i < arr.length; i++) {
+                        if (arr[i] && arr[i].value && arr[i].value.trim() === textValue.trim()) { optionsArray = arr; break; }
+                    }
+                    if (optionsArray) break;
+                }
+            }
+            if (!optionsArray) return;
+            var foundKey = null;
+            for (var j = 0; j < optionsArray.length; j++) {
+                if (optionsArray[j] && optionsArray[j].value && optionsArray[j].value.trim() === textValue.trim()) {
+                    foundKey = optionsArray[j].key; break;
+                }
+            }
+            if (foundKey === null) return;
+            try { s.$apply(function() { s.model[fieldName] = foundKey; }); }
+            catch (e) { try { s.model[fieldName] = foundKey; } catch (e2) {} }
+            try {
+                var vi = el.querySelector('input.k-input');
+                if (vi) vi.value = textValue;
+            } catch (e) {}
+            logs.push('✅ ' + label + ' = ' + textValue);
+        }
+        
+        var stu = data.student || {};
+        var fat = data.father || {};
+        var mot = data.mother || {};
+        var con = data.contact || {};
+        
+        // ✅ منطق تلفن‌ها:
+        // - تلفن منزل: اگه خالی یا "—" یا کمتر از 7 رقم بود → موبایل پدر
+        // - موبایل شاد: همیشه موبایل مادر
+        // - موبایل درگاه دولت: همیشه موبایل مادر
+        var rawLandline = (con.landline || '').trim();
+        var landlineDigits = rawLandline.replace(/[^\d]/g, '');
+        var homePhone = (landlineDigits.length >= 7 && landlineDigits.length <= 11) 
+            ? landlineDigits 
+            : (fat.mobile || '');
+        var shadPhone = mot.mobile || con.mobile;   // اول موبایل مادر، اگه نبود موبایل دانش‌آموز
+        var govPhone = mot.mobile || con.mobile;    // اول موبایل مادر، اگه نبود موبایل دانش‌آموز
+        
+        safeApply(function() {
+            setField('firstName', stu.firstName, 'نام');
+            setField('lastName', stu.lastName, 'نام خانوادگی');
+            setField('iDno', stu.iDno, 'شماره شناسنامه');
+            setField('birthDate', stu.birthDate, 'تاریخ تولد');
+            setField('birthPlace', stu.birthPlace, 'محل تولد');
+            setField('issuePlace', stu.birthPlace, 'محل صدور');
+            setField('fatherNationalCode', fat.nationalId, 'کد ملی پدر');
+            setField('fatherBirthDate', fat.birthDate, 'تاریخ تولد پدر');
+            setField('fatherMobileNumber', fat.mobile, 'موبایل پدر');
+            setField('fatherIDno', fat.iDno, 'شناسنامه پدر');
+            setField('fatherIssuePlace', fat.birthPlace, 'محل صدور پدر');
+            setField('motherNationalCode', mot.nationalId, 'کد ملی مادر');
+            setField('motherBirthDate', mot.birthDate, 'تاریخ تولد مادر');
+            setField('motherMobileNumber', mot.mobile, 'موبایل مادر');
+            setField('homeAddress', con.address, 'آدرس');
+            setField('homePostalCode', con.postalCode, 'کد پستی');
+            setField('homeTelephone', homePhone, 'تلفن منزل');
+            setField('studentMobileGoverment', govPhone, 'موبایل درگاه دولت');
+            setField('studentMobileNumber', shadPhone, 'موبایل شاد');
+            setField('fatherWorkAddress', fat.workplace, 'آدرس کار پدر');
+            setField('motherWorkAddress', mot.workplace, 'آدرس کار مادر');
+        });
+        
+        setCombo('جنسیت', stu.gender, 'جنسیت');
+        setCombo('ملیت', 'ایران', 'ملیت');
+        setCombo('ملیت پدر', 'ایران', 'ملیت پدر');
+        setCombo('ملیت مادر', 'ایران', 'ملیت مادر');
+        setCombo('مدرک تحصیلی پدر', fat.education, 'مدرک پدر');
+        setCombo('مدرک تحصیلی مادر', mot.education, 'مدرک مادر');
+        setCombo('شغل پدر', fat.occupation, 'شغل پدر');
+        setCombo('شغل مادر', mot.occupation, 'شغل مادر');
+        
+        var tabs = modal.querySelectorAll('.nav-tabs a');
+        var targetTab = null;
+        for (var t = 0; t < tabs.length; t++) {
+            if (tabs[t].textContent.trim() === 'اطلاعات تکمیلی') { targetTab = tabs[t]; break; }
+        }
+        if (targetTab) {
+            targetTab.click();
+            setTimeout(function() {
+                setCombo('نوع موجودیت دانش آموز', 'عادی', 'نوع موجودیت');
+                setCombo('دین', 'مسلمان', 'دین');
+                setCombo('مذهب', 'تشیع', 'مذهب');
+            }, 800);
+        }
+        return logs;
+    }
+    
+    // ============================================================
+    //  ❓ سوال تایید از کاربر بعد از بسته شدن modal
+    // ============================================================
+    function askUserConfirmation(nationalId, studentName, logFn) {
+        var wasSuccessful = confirm(
+            '📋 اطلاعات «' + studentName + '» پر شد.\n\n' +
+            '❓ آیا با موفقیت تایید و ذخیره کردید؟\n\n' +
+            '✅ «تایید» → به لیست «منتقل شده‌ها» اضافه می‌شود\n' +
+            '⏭️ «انصراف» → به انبار برمی‌گردد'
+        );
+        
+        if (wasSuccessful) {
+            moveToTransferred(nationalId);
+            if (typeof logFn === 'function') {
+                logFn('✅ ' + studentName + ' به «منتقل شده‌ها» اضافه شد', 'success');
+            }
+            showToast('🎉 ' + studentName + ' با موفقیت منتقل شد', 'success');
+        } else {
+            if (typeof logFn === 'function') {
+                logFn('⏭️ ' + studentName + ' — انتقال لغو شد، به انبار برگشت', 'warning');
+            }
+            showToast('⏭️ انتقال لغو شد', 'warning');
+        }
+        
+        try { if (typeof panelRefreshCallback === 'function') panelRefreshCallback(); } catch (e) {}
+    }
+    
+    // ============================================================
+    //  🚀 تابع اصلی انتقال
+    // ============================================================
+    async function transferStudent(nationalId, transferBtn, logFn) {
+        if (transferLocks.has(nationalId)) return;
+        transferLocks.add(nationalId);
+        
+        var originalText = transferBtn ? transferBtn.textContent : '';
+        if (transferBtn) { transferBtn.textContent = '⏳'; transferBtn.disabled = true; }
+        
+        function log(msg, type) {
+            if (typeof logFn === 'function') logFn(msg, type || 'default');
+        }
+        
+        function resetButton() {
+            transferLocks.delete(nationalId);
+            if (transferBtn) {
+                try { transferBtn.textContent = originalText; transferBtn.disabled = false; } catch (e) {}
+            }
+        }
+        
+        try {
+            // ===== 1. چک اینترنت =====
+            if (!isOnline()) {
+                showToast('🌐 اینترنت قطع است', 'error');
+                log('❌ اینترنت قطع است', 'error');
+                resetButton();
+                return;
+            }
+            
+            // ===== 2. چک انبار =====
+            var data = getFromStorage(nationalId);
+            if (!data) {
+                showToast('❌ اطلاعات دانش‌آموز در انبار نیست', 'error');
+                resetButton();
+                return;
+            }
+            
+            var studentName = ((data.student || {}).firstName || '') + ' ' + ((data.student || {}).lastName || '');
+            log('📤 شروع انتقال: ' + studentName + ' (' + nationalId + ')', 'info');
+            
+            // ===== 3. چک صفحه =====
+            if (!isOnStudentInfoPage()) {
+                log('🚀 ریدایرکت به صفحه مشخصات فردی...', 'info');
+                await autoRedirectToStudentInfoPage();
+                await sleep(2000);
+                if (!isOnStudentInfoPage()) {
+                    showToast('❌ به صفحه مشخصات فردی هدایت نشدی', 'error');
+                    resetButton();
+                    return;
+                }
+            }
+            
+            // ===== 4. پیدا کردن دانش‌آموز با API (با retry) =====
+            log('🔍 جستجو با API...', 'info');
+            var apiStudent = await findStudentViaAPI(nationalId, log);
+            if (!apiStudent) {
+                log('❌ دانش‌آموز در سیدا پیدا نشد', 'error');
+                showToast('❌ دانش‌آموز در سیدا پیدا نشد', 'error');
+                resetButton();
+                return;
+            }
+            log('✅ پیدا شد: ' + apiStudent.firstName + ' ' + apiStudent.lastName, 'success');
+            
+            // ===== 5. پیدا کردن ردیف =====
+            var row = findRowByNationalCode(nationalId);
+            if (!row) {
+                log('📄 اعمال فیلتر...', 'info');
+                if (!applyGridFilterByCode(nationalId)) {
+                    log('❌ نمی‌توان فیلتر اعمال کرد', 'error');
+                    resetButton();
+                    return;
+                }
+                await sleep(2000);
+                row = findRowByNationalCode(nationalId);
+            }
+            if (!row) {
+                log('❌ ردیف پیدا نشد', 'error');
+                showToast('❌ ردیف پیدا نشد', 'error');
+                restoreGridFilter();
+                resetButton();
+                return;
+            }
+            
+            // ===== 6. هایلایت =====
+            await highlightRow(row);
+            
+            // ===== 7. کلیک ویرایش =====
+            var editBtn = row.querySelector('a.k-grid-edit, button.k-grid-edit, a[ng-click*="edit"]');
+            if (!editBtn) {
+                log('❌ دکمه ویرایش پیدا نشد', 'error');
+                restoreGridFilter();
+                resetButton();
+                return;
+            }
+            log('🖱️ کلیک روی ویرایش...', 'info');
+            editBtn.click();
+            
+            // ===== 8. انتظار برای modal =====
+            var modalResult;
+            try {
+                modalResult = await waitForModalToOpen(15000);
+            } catch (e) {
+                log('❌ ' + e.message, 'error');
+                showToast('❌ مودال باز نشد', 'error');
+                restoreGridFilter();
+                resetButton();
+                return;
+            }
+            log('📦 مودال باز شد', 'success');
+            
+            // ===== 9. پر کردن فرم =====
+            var fillLogs = fillSidaForm(modalResult.modal, modalResult.scope, data);
+            for (var i = 0; i < fillLogs.length; i++) log('   ' + fillLogs[i], 'default');
+            
+            log('✅ فرم پر شد. لطفاً تایید و ذخیره کنید.', 'success');
+            showToast('📝 فرم پر شد — لطفاً تایید یا انصراف بزنید', 'info');
+            
+            // ===== 10. انتظار بدون محدودیت برای بسته شدن modal =====
+            log('⏳ منتظر تایید شما هستم...', 'info');
+            
+            var waitForUserInterval = setInterval(function() {
+                var modal = document.querySelector('[uib-modal-window]');
+                if (!modal) {
+                    clearInterval(waitForUserInterval);
+                    log('📋 مودال بسته شد', 'info');
+                    
+                    // ===== 11. سوال از کاربر =====
+                    setTimeout(function() {
+                        askUserConfirmation(nationalId, studentName, log);
+                        restoreGridFilter();
+                        resetButton();
+                    }, 500);
+                }
+            }, 500);
+            
+        } catch (e) {
+            console.error('خطا در انتقال:', e);
+            log('❌ خطا: ' + e.message, 'error');
+            showToast('❌ خطا: ' + e.message, 'error');
+            restoreGridFilter();
+            resetButton();
+        }
+    }
+    
+    // ============================================================
+    //  📊 Excel
+    // ============================================================
+    function exportToExcel() {
+        var s = getStorage();
+        var keys = Object.keys(s);
+        if (keys.length === 0) { showToast('انبار خالیه!', 'warning'); return; }
+        var rows = [];
+        rows.push(['کد ملی','نام','نام خانوادگی','جنسیت','تاریخ تولد','شماره شناسنامه','محل تولد','تابعیت','نام پدر','کد ملی پدر','موبایل پدر','تاریخ تولد پدر','شناسنامه پدر','محل تولد پدر','مدرک پدر','شغل پدر','محل اشتغال پدر','نام مادر','کد ملی مادر','موبایل مادر','تاریخ تولد مادر','شناسنامه مادر','محل تولد مادر','مدرک مادر','شغل مادر','کد پستی','استان','شهر','آدرس','موبایل','تلفن ثابت'].join(','));
+        keys.forEach(function(k) {
+            var d = s[k].data || s[k];
+            var stu = d.student || {}, fat = d.father || {}, mot = d.mother || {}, con = d.contact || {};
+            var row = [k, stu.firstName || '', stu.lastName || '', stu.gender || '', stu.birthDate || '', stu.iDno || '', stu.birthPlace || '', stu.nationality || '', fat.fullName || '', fat.nationalId || '', fat.mobile || '', fat.birthDate || '', fat.iDno || '', fat.birthPlace || '', fat.education || '', fat.occupation || '', fat.workplace || '', mot.fullName || '', mot.nationalId || '', mot.mobile || '', mot.birthDate || '', mot.iDno || '', mot.birthPlace || '', mot.education || '', mot.occupation || '', con.postalCode || '', con.province || '', con.city || '', con.address || '', con.mobile || '', con.landline || ''];
+            row = row.map(function(v) {
+                v = String(v == null ? '' : v).trim();
+                return (v.indexOf(',') > -1 || v.indexOf('"') > -1) ? '"' + v.replace(/"/g, '""') + '"' : v;
+            });
+            rows.push(row.join(','));
+        });
+        var csv = '\uFEFF' + rows.join('\r\n');
+        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'bina_students_' + new Date().toISOString().slice(0, 10) + '.csv';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('Excel دانلود شد', 'success');
+    }
+    
+    // ============================================================
+    //  📄 Word
+    // ============================================================
+    function exportLogToWord(collectLogs) {
+        var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><style>body{font-family:Tahoma;direction:rtl;padding:20px;}h2{color:#1e293b;border-bottom:3px solid #667eea;padding-bottom:8px;}pre{background:#f8fafc;padding:15px;border-radius:8px;font-family:Consolas,monospace;font-size:13px;direction:rtl;text-align:right;white-space:pre-wrap;border:1px solid #cbd5e1;}.meta{color:#64748b;font-size:12px;margin-bottom:20px;}</style></head><body><h2>📋 گزارش انتقال بینا به سیدا</h2><p class="meta">تاریخ: ' + new Date().toLocaleString('fa-IR') + '</p>';
+        if (collectLogs && collectLogs.length) {
+            var plainText = collectLogs.map(function(item) { return '[' + (item.time || '') + '] ' + (item.text || ''); }).join('\n');
+            html += '<pre>' + plainText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
+        }
+        html += '</body></html>';
+        var blob = new Blob(['\uFEFF' + html], { type: 'application/msword;charset=utf-8' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'transfer_report_' + new Date().toISOString().slice(0, 10) + '.doc';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(blob);
+        showToast('Word دانلود شد', 'success');
+    }
+    
+    function copyLogToClipboard(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function() { showToast('گزارش کپی شد!', 'success'); }).catch(function() { fallbackCopy(text); });
+        } else { fallbackCopy(text); }
+    }
+    
+    function fallbackCopy(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); showToast('گزارش کپی شد!', 'success'); }
+        catch (e) { showToast('کپی نشد!', 'error'); }
+        document.body.removeChild(ta);
+    }
+    
+    // ============================================================
+    //  🎨 PANEL
+    // ============================================================
+    function createPanel() {
         var panel = document.createElement('div');
         panel.id = 'pasteFromBinaPanel';
-        panel.style.cssText = `
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            width: 460px;
-            max-width: 92vw;
-            max-height: 92vh;
-            background: #1e293b;
-            color: #e2e8f0;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            z-index: 9999999;
-            font-family: Tahoma, Arial, sans-serif;
-            direction: rtl;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        `;
-
+        panel.style.cssText = 'position:fixed;top:10px;left:10px;width:460px;max-width:92vw;max-height:92vh;background:#1e293b;color:#e2e8f0;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.5);z-index:9999999;font-family:Tahoma,Arial,sans-serif;direction:rtl;display:flex;flex-direction:column;overflow:hidden;';
+        
         var header = document.createElement('div');
-        header.style.cssText = `
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 10px 14px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            user-select: none;
-            cursor: move;
-        `;
-        header.innerHTML = `
-            <strong style="font-size:17px;">📤 انتقال از بینا به سیدا</strong>
-            <div style="display:flex;gap:6px;">
-                <span id="pfb-min" title="مینیمایز" style="cursor:pointer;font-size:17px;padding:4px 10px;background:rgba(255,255,255,0.15);border-radius:6px;">➖</span>
-                <span id="pfb-reset" title="ریست پنل" style="cursor:pointer;font-size:17px;padding:4px 10px;background:rgba(255,255,255,0.15);border-radius:6px;">🔄</span>
-                <span id="pfb-close" title="بستن" style="cursor:pointer;font-size:17px;padding:4px 10px;background:rgba(255,255,255,0.15);border-radius:6px;">✖</span>
-            </div>
-        `;
-
+        header.style.cssText = 'background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;user-select:none;cursor:move;';
+        header.innerHTML = '<strong style="font-size:17px;">📥 انتقال از بینا به سیدا</strong><div style="display:flex;gap:6px;"><span id="pfb-min" title="مینیمایز" style="cursor:pointer;font-size:17px;padding:4px 10px;background:rgba(255,255,255,0.15);border-radius:6px;">➖</span><span id="pfb-reset" title="ریست پنل" style="cursor:pointer;font-size:17px;padding:4px 10px;background:rgba(255,255,255,0.15);border-radius:6px;">🔄</span><span id="pfb-close" title="بستن" style="cursor:pointer;font-size:17px;padding:4px 10px;background:rgba(255,255,255,0.15);border-radius:6px;">✖</span></div>';
+        
         var status = document.createElement('div');
         status.id = 'pfb-status';
-        status.style.cssText = `
-            padding: 10px 14px;
-            background: #0f172a;
-            font-size: 15px;
-            color: #94a3b8;
-            border-bottom: 1px solid #334155;
-        `;
-
+        status.style.cssText = 'padding:10px 14px;background:#0f172a;font-size:15px;color:#94a3b8;border-bottom:1px solid #334155;';
+        
         var body = document.createElement('div');
         body.id = 'pfb-body';
-        body.style.cssText = `
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            overflow-y: auto;
-            flex: 1;
-            min-height: 0;
-        `;
-
+        body.style.cssText = 'padding:12px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;flex:1;min-height:0;';
+        
         var tabBar = document.createElement('div');
-        tabBar.style.cssText = `
-            display: flex;
-            gap: 6px;
-            border-bottom: 2px solid #334155;
-            padding-bottom: 6px;
-        `;
-
+        tabBar.style.cssText = 'display:flex;gap:6px;border-bottom:2px solid #334155;padding-bottom:6px;';
+        
         function makeTab(id, label, active) {
             var t = document.createElement('div');
             t.id = 'pfb-tab-' + id;
             t.textContent = label;
-            t.style.cssText = `
-                padding: 8px 16px;
-                cursor: pointer;
-                border-radius: 8px;
-                font-size: 15px;
-                font-weight: bold;
-                background: ${active ? '#3b82f6' : 'rgba(255,255,255,0.05)'};
-                color: ${active ? 'white' : '#94a3b8'};
-                transition: all 0.2s;
-                flex: 1;
-                text-align: center;
-            `;
+            t.style.cssText = 'padding:8px 16px;cursor:pointer;border-radius:8px;font-size:15px;font-weight:bold;background:' + (active ? '#3b82f6' : 'rgba(255,255,255,0.05)') + ';color:' + (active ? 'white' : '#94a3b8') + ';transition:all 0.2s;flex:1;text-align:center;';
             return t;
         }
-
+        
         var tabActions = makeTab('actions', '🛠️ عملیات', true);
         var tabStorage = makeTab('storage', '📦 انبار', false);
         var tabLog = makeTab('log', '📋 گزارش', false);
-
+        
         tabBar.appendChild(tabActions);
         tabBar.appendChild(tabStorage);
         tabBar.appendChild(tabLog);
-
+        
         var contentActions = document.createElement('div');
         contentActions.id = 'pfb-content-actions';
         contentActions.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
-
+        
         var contentStorage = document.createElement('div');
         contentStorage.id = 'pfb-content-storage';
         contentStorage.style.cssText = 'display:none;flex-direction:column;gap:10px;';
-
+        
         var contentLog = document.createElement('div');
         contentLog.id = 'pfb-content-log';
         contentLog.style.cssText = 'display:none;flex-direction:column;gap:10px;';
-
-        // ===== دکمه‌های عملیات =====
-        var btnPaste = document.createElement('button');
-        btnPaste.innerHTML = '📤 جاگذاری در فرم سیدا';
-        btnPaste.style.cssText = `
-            padding: 16px; background: #3b82f6; color: white; border: none;
-            border-radius: 10px; cursor: pointer; font-size: 17px; font-weight: bold;
-            font-family: inherit;
-        `;
-        btnPaste.onmouseenter = function () { this.style.background = '#2563eb'; };
-        btnPaste.onmouseleave = function () { this.style.background = '#3b82f6'; };
-
+        
+        // ===== Actions Tab =====
         var btnImportClipboard = document.createElement('button');
-        btnImportClipboard.innerHTML = '📥 پیست از کلیپ‌بورد';
-        btnImportClipboard.style.cssText = `
-            padding: 14px; background: #f59e0b; color: white; border: none;
-            border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: bold;
-            font-family: inherit;
-        `;
-        btnImportClipboard.onmouseenter = function () { this.style.background = '#d97706'; };
-        btnImportClipboard.onmouseleave = function () { this.style.background = '#f59e0b'; };
-
-        contentActions.appendChild(btnPaste);
+        btnImportClipboard.innerHTML = '📥 انتقال از بینا';
+        btnImportClipboard.style.cssText = 'padding:16px;background:#f59e0b;color:white;border:none;border-radius:10px;cursor:pointer;font-size:17px;font-weight:bold;font-family:inherit;';
+        
+        var helpBox = document.createElement('div');
+        helpBox.style.cssText = 'background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px;font-size:15px;line-height:2;color:#94a3b8;';
+        helpBox.innerHTML = '<strong style="color:#3b82f6;">📖 راهنمای استفاده:</strong><br><br>' +
+            '1️⃣ ابتدا در سامانه <b style="color:#10b981;">بینا</b> اطلاعات را جمع‌آوری کنید<br>' +
+            '2️⃣ JSON را کپی کرده و اینجا <b>«انتقال از بینا»</b> را بزنید<br>' +
+            '3️⃣ به تب <b style="color:#3b82f6;">📦 انبار</b> بروید<br>' +
+            '4️⃣ کنار هر دانش‌آموز دکمه <b style="color:#0ea5e9;">📤</b> را بزنید<br>' +
+            '5️⃣ کد خودکار به صفحه مشخصات فردی می‌رود و فرم را پر می‌کند<br>' +
+            '6️⃣ شما فقط <b>تایید و ذخیره</b> کنید<br><br>' +
+            '<div style="background:#fef3c7;color:#92400e;padding:10px 12px;border-radius:6px;font-size:14px;">💡 اگه اشتباه شد، از تب «منتقل شده‌ها» می‌توانید بازگردانی کنید</div>';
+        
         contentActions.appendChild(btnImportClipboard);
-
-        // ===== دکمه‌های انبار =====
-        var btnView = document.createElement('button');
-        btnView.innerHTML = '📋 مشاهده لیست';
-        btnView.style.cssText = `
-            padding: 12px; background: #8b5cf6; color: white; border: none;
-            border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: bold;
-            font-family: inherit;
-        `;
-
-        var btnClearAll = document.createElement('button');
-        btnClearAll.innerHTML = '🗑️ پاک کردن کل انبار و لیست';
-        btnClearAll.style.cssText = `
-            padding: 12px; background: #dc2626; color: white; border: none;
-            border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: bold;
-            font-family: inherit;
-        `;
-
+        contentActions.appendChild(helpBox);
+        
+        // ===== Storage Tab =====
+        var subTabBar = document.createElement('div');
+        subTabBar.style.cssText = 'display:flex;gap:6px;';
+        
+        var subTabStorage = document.createElement('div');
+        subTabStorage.id = 'pfb-subtab-storage';
+        subTabStorage.style.cssText = 'flex:1;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;text-align:center;background:#3b82f6;color:white;user-select:none;transition:all 0.2s;';
+        
+        var subTabTransferred = document.createElement('div');
+        subTabTransferred.id = 'pfb-subtab-transferred';
+        subTabTransferred.style.cssText = 'flex:1;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;text-align:center;background:rgba(255,255,255,0.05);color:#94a3b8;user-select:none;transition:all 0.2s;';
+        
+        subTabBar.appendChild(subTabStorage);
+        subTabBar.appendChild(subTabTransferred);
+        
         var searchBox = document.createElement('input');
         searchBox.type = 'text';
         searchBox.placeholder = '🔎 جستجو (کد ملی یا نام)...';
-        searchBox.style.cssText = `
-            padding: 10px 14px; background: #0f172a; color: #e2e8f0;
-            border: 1px solid #334155; border-radius: 8px; font-family: inherit;
-            font-size: 15px; direction: rtl; outline: none;
-        `;
-
+        searchBox.style.cssText = 'padding:10px 14px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:8px;font-family:inherit;font-size:15px;direction:rtl;outline:none;';
+        
+        var storageActions = document.createElement('div');
+        storageActions.style.cssText = 'display:flex;gap:6px;';
+        
+        var btnExport = document.createElement('button');
+        btnExport.innerHTML = '📊 اکسل';
+        btnExport.style.cssText = 'flex:1;padding:10px;background:#059669;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;font-family:inherit;';
+        
+        var btnClearAll = document.createElement('button');
+        btnClearAll.innerHTML = '🗑️ پاک کردن همه';
+        btnClearAll.style.cssText = 'flex:1;padding:10px;background:#dc2626;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;font-family:inherit;';
+        
+        storageActions.appendChild(btnExport);
+        storageActions.appendChild(btnClearAll);
+        
         var storageList = document.createElement('div');
         storageList.id = 'pfb-storage-list';
-        storageList.style.cssText = `
-            background: #0f172a; border-radius: 8px; padding: 12px;
-            font-size: 15px; line-height: 2;
-            color: #cbd5e1; max-height: 400px; min-height: 150px;
-            overflow-y: auto; direction: rtl; text-align: right;
-            border: 1px solid #334155;
-        `;
-        storageList.textContent = 'خالی';
-
+        storageList.style.cssText = 'background:#0f172a;border-radius:8px;padding:10px;font-size:14px;color:#cbd5e1;max-height:400px;min-height:150px;overflow-y:auto;direction:rtl;text-align:right;border:1px solid #334155;';
+        
+        contentStorage.appendChild(subTabBar);
         contentStorage.appendChild(searchBox);
-        contentStorage.appendChild(btnView);
-        contentStorage.appendChild(btnClearAll);
+        contentStorage.appendChild(storageActions);
         contentStorage.appendChild(storageList);
-
-        // ===== تب گزارش =====
+        
+        // ===== Log Tab =====
         var logToolbar = document.createElement('div');
         logToolbar.style.cssText = 'display:flex;gap:6px;';
-
+        
         var btnCopyLog = document.createElement('button');
         btnCopyLog.innerHTML = '📋 کپی';
-        btnCopyLog.style.cssText = `
-            flex: 1; padding: 10px; background: #3b82f6; color: white; border: none;
-            border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;
-            font-family: inherit;
-        `;
-
+        btnCopyLog.style.cssText = 'flex:1;padding:10px;background:#3b82f6;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:bold;font-family:inherit;';
+        
         var btnWordLog = document.createElement('button');
-        btnWordLog.innerHTML = '📄 دانلود Word';
-        btnWordLog.style.cssText = `
-            flex: 1; padding: 10px; background: #059669; color: white; border: none;
-            border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;
-            font-family: inherit;
-        `;
-
+        btnWordLog.innerHTML = '📄 Word';
+        btnWordLog.style.cssText = 'flex:1;padding:10px;background:#059669;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:bold;font-family:inherit;';
+        
         var btnClearLog = document.createElement('button');
         btnClearLog.innerHTML = '🗑️';
-        btnClearLog.title = 'پاک کردن گزارش';
-        btnClearLog.style.cssText = `
-            padding: 10px 14px; background: #475569; color: white; border: none;
-            border-radius: 8px; cursor: pointer; font-size: 14px; font-family: inherit;
-        `;
-
+        btnClearLog.style.cssText = 'padding:10px 14px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-family:inherit;';
+        
         logToolbar.appendChild(btnCopyLog);
         logToolbar.appendChild(btnWordLog);
         logToolbar.appendChild(btnClearLog);
-
+        
         var log = document.createElement('div');
         log.id = 'pfb-log';
-        log.style.cssText = `
-            background: #0f172a; border-radius: 8px; padding: 12px;
-            font-family: Consolas, monospace; font-size: 15px; line-height: 2;
-            color: #cbd5e1; max-height: 400px; min-height: 200px;
-            overflow-y: auto; white-space: pre-wrap; direction: rtl;
-            text-align: right; border: 1px solid #334155;
-        `;
+        log.style.cssText = 'background:#0f172a;border-radius:8px;padding:12px;font-family:Consolas,monospace;font-size:14px;line-height:2;color:#cbd5e1;max-height:400px;min-height:200px;overflow-y:auto;white-space:pre-wrap;direction:rtl;text-align:right;border:1px solid #334155;';
         log.textContent = 'گزارش اینجا نمایش داده می‌شود...';
-
+        
         contentLog.appendChild(logToolbar);
         contentLog.appendChild(log);
-
+        
         body.appendChild(tabBar);
         body.appendChild(contentActions);
         body.appendChild(contentStorage);
@@ -7183,492 +7947,333 @@ function extractClassListTool() {
         panel.appendChild(status);
         panel.appendChild(body);
         document.body.appendChild(panel);
-        makeDraggableByTouch(panel, header);     
+        
+        makeDraggableByTouch(panel, header);
+        
+        // ===== State =====
+        var logs = { transfer: [] };
+        var currentSubTab = 'storage';
+        
+        // ===== Helpers =====
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        
+        function renderLog() {
+            if (logs.transfer.length === 0) {
+                log.innerHTML = '<span style="color:#64748b;">گزارشی نیست...</span>';
+                return;
+            }
+            var html = '<div style="color:#cbd5e1;">📤 انتقال به سیدا:</div>';
+            html += '<div style="color:#94a3b8;">───────────────────────</div>';
+            logs.transfer.forEach(function(item) {
+                var color = '#cbd5e1';
+                if (item.type === 'success') color = '#10b981';
+                else if (item.type === 'error') color = '#ef4444';
+                else if (item.type === 'warning') color = '#f59e0b';
+                else if (item.type === 'info') color = '#3b82f6';
+                html += '<div style="color:' + color + ';">[' + item.time + '] ' + escapeHtml(item.text) + '</div>';
+            });
+            log.innerHTML = html;
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        function logMsg(msg, type) {
+            type = type || 'default';
+            var time = new Date().toLocaleTimeString('fa-IR').substring(0, 8);
+            logs.transfer.push({ text: msg, type: type, time: time });
+            if (logs.transfer.length > MAX_LOG_LINES) {
+                logs.transfer = logs.transfer.slice(-MAX_LOG_LINES);
+            }
+            renderLog();
+        }
+        
+        function getLogText() {
+            if (logs.transfer.length === 0) return 'گزارشی نیست';
+            var text = '📤 انتقال به سیدا:\n───────────────────────\n';
+            logs.transfer.forEach(function(item) { text += '[' + item.time + '] ' + item.text + '\n'; });
+            return text;
+        }
+        
+        function updateStatus() {
+            var c = getStorageCount();
+            var t = getTransferredCount();
+            status.innerHTML = '🌐 <b style="color:#3b82f6;">سیدا</b> — انبار: <b>' + c + '</b> | ✅ منتقل: <b style="color:#10b981;">' + t + '</b>';
+            subTabStorage.textContent = '📦 در انبار (' + c + ')';
+            subTabTransferred.textContent = '✅ منتقل شده (' + t + ')';
+        }
+        
         function switchTab(id) {
-            ['actions', 'storage', 'log'].forEach(function (t) {
+            ['actions', 'storage', 'log'].forEach(function(t) {
                 var tab = document.getElementById('pfb-tab-' + t);
                 var content = document.getElementById('pfb-content-' + t);
                 if (t === id) {
-                    tab.style.background = '#3b82f6';
-                    tab.style.color = 'white';
-                    content.style.display = 'flex';
+                    tab.style.background = '#3b82f6'; tab.style.color = 'white'; content.style.display = 'flex';
                 } else {
-                    tab.style.background = 'rgba(255,255,255,0.05)';
-                    tab.style.color = '#94a3b8';
-                    content.style.display = 'none';
+                    tab.style.background = 'rgba(255,255,255,0.05)'; tab.style.color = '#94a3b8'; content.style.display = 'none';
                 }
             });
         }
-
-        tabActions.onclick = function () { switchTab('actions'); };
-        tabStorage.onclick = function () { switchTab('storage'); };
-        tabLog.onclick = function () { switchTab('log'); };
-
-        // ===== logs تعریف میشه قبل از استفاده =====
-        var logs = { paste: [] };
-
-        function renderLog() {
-            var html = '';
-            if (logs.paste.length) {
-                html += '📤 جاگذاری در سیدا:\n';
-                html += '───────────────────────\n';
-                html += logs.paste.join('\n');
-            }
-            if (!html) html = 'گزارشی نیست...';
-            log.textContent = html;
-            log.scrollTop = log.scrollHeight;
-        }
-
-        function getLogText() {
-            if (logs.paste.length) {
-                return '📤 جاگذاری در سیدا:\n───────────────────────\n' + logs.paste.join('\n');
-            }
-            return 'گزارشی نیست';
-        }
-
-        function updateStatus() {
-            var c = getStorageCount();
-            var type = hasGM() ? 'GM' : 'Cookie';
-            status.innerHTML = '🌐 <b style="color:#3b82f6;">سیدا</b> — انبار (' + type + '): <b>' + c + '</b> دانش‌آموز';
-        }
-        updateStatus();
-
-        function toEn(str) {
-            if (str === null || str === undefined || str === '') return str;
-            str = String(str);
-            return str.replace(/[۰-۹]/g, function (d) {
-                return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d);
-            }).replace(/\//g, '');
-        }
-
-        // ===== دکمه پیست از کلیپ‌بورد =====
-        btnImportClipboard.onclick = function () {
-            logs.paste = [];
-            logs.paste.push('📥 شروع پیست از کلیپ‌بورد...');
-
-            function processText(text) {
-                if (!text || text.trim() === '') {
-                    logs.paste.push('❌ کلیپ‌بورد خالیه');
-                    renderLog();
-                    switchTab('log');
-                    showToast('کلیپ‌بورد خالیه!', 'error');
-                    return;
-                }
-
-                var data;
-                try {
-                    data = JSON.parse(text);
-                } catch (e) {
-                    logs.paste.push('❌ JSON نامعتبر: ' + e.message);
-                    logs.paste.push('👉 اول تو بینا «📋 کپی JSON برای سیدا» رو بزن');
-                    renderLog();
-                    switchTab('log');
-                    showToast('JSON نامعتبر!', 'error');
-                    return;
-                }
-
-                var keys = Object.keys(data);
-                if (keys.length === 0) {
-                    logs.paste.push('❌ داده خالیه');
-                    renderLog();
-                    switchTab('log');
-                    showToast('داده خالیه!', 'error');
-                    return;
-                }
-
-                logs.paste.push('📦 دریافت شد: ' + keys.length + ' دانش‌آموز');
-
-                // ذخیره در localStorage
-                try {
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-                    logs.paste.push('✅ در localStorage ذخیره شد');
-                } catch (e) {
-                    logs.paste.push('⚠️ خطا در localStorage: ' + e.message);
-                }
-
-                // ذخیره در GM
-                if (hasGM()) {
-                    try {
-                        GM_setValue(STORAGE_KEY, JSON.stringify(data));
-                        logs.paste.push('✅ در GM ذخیره شد');
-                    } catch (e) {
-                        logs.paste.push('⚠️ خطا در GM: ' + e.message);
-                    }
-                }
-
-                // ذخیره در Cookie (اگه حجم کم باشه)
-                try {
-                    var encoded = encodeURIComponent(JSON.stringify(data));
-                    if (encoded.length <= 4000) {
-                        var expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toUTCString();
-                        document.cookie = COOKIE_NAME + '=' + encoded +
-                            '; expires=' + expires + '; path=/; domain=.medu.ir; SameSite=Lax';
-                        logs.paste.push('✅ در Cookie ذخیره شد');
-                    }
-                } catch (e) {}
-
-                // آپدیت UI
-                updateStatus();
-                renderStorageList('');
-
-                logs.paste.push('');
-                logs.paste.push('🎉 تمام! ' + keys.length + ' دانش‌آموز وارد انبار شد');
-                renderLog();
-                switchTab('log');
-                showToast('✅ ' + keys.length + ' دانش‌آموز وارد شد!', 'success');
-            }
-
-            // تلاش برای خواندن از کلیپ‌بورد
-            if (navigator.clipboard && navigator.clipboard.readText) {
-                navigator.clipboard.readText().then(function (text) {
-                    processText(text);
-                }).catch(function (err) {
-                    logs.paste.push('⚠️ clipboard API خطا: ' + err.message);
-                    logs.paste.push('👉 از prompt استفاده کن');
-                    renderLog();
-                    switchTab('log');
-
-                    var text = prompt('JSON رو اینجا پیست کن (Ctrl+V):');
-                    if (text) processText(text);
-                });
+        
+        function switchSubTab(tab) {
+            currentSubTab = tab;
+            if (tab === 'storage') {
+                subTabStorage.style.background = '#3b82f6'; subTabStorage.style.color = 'white';
+                subTabTransferred.style.background = 'rgba(255,255,255,0.05)'; subTabTransferred.style.color = '#94a3b8';
+                renderStorageList(searchBox.value);
             } else {
-                var text = prompt('JSON رو اینجا پیست کن (Ctrl+V):');
-                if (text) processText(text);
-            }
-        };
-
-        function pasteIntoSida() {
-            logs.paste = [];
-
-            try {
-                var modal = document.querySelector('[uib-modal-window]');
-                if (!modal) {
-                    logs.paste.push('❌ مودال پیدا نشد');
-                    renderLog();
-                    showToast('مودال پیدا نشد!', 'error');
-                    return;
-                }
-
-                var scope = angular.element(modal).scope();
-                if (!scope || !scope.model) {
-                    logs.paste.push('❌ اسکوپ پیدا نشد');
-                    renderLog();
-                    showToast('اسکوپ پیدا نشد!', 'error');
-                    return;
-                }
-
-                var sidaNationalId = toEn(scope.model.nationalCode || scope.model.id);
-                if (!sidaNationalId) {
-                    logs.paste.push('❌ کد ملی سیدا پیدا نشد');
-                    renderLog();
-                    showToast('کد ملی سیدا پیدا نشد!', 'error');
-                    return;
-                }
-
-                logs.paste.push('🔍 کد ملی سیدا: ' + sidaNationalId);
-
-                var data = getFromStorage(sidaNationalId);
-                if (!data) {
-                    logs.paste.push('❌ اطلاعات این دانش‌آموز در انبار نیست');
-                    logs.paste.push('📦 تعداد در انبار: ' + getStorageCount());
-                    renderLog();
-                    showToast('اطلاعات در انبار نیست!', 'warning');
-                    return;
-                }
-
-                var studentName = (data.student.firstName || '') + ' ' + (data.student.lastName || '');
-                logs.paste.push('✅ ' + studentName);
-                logs.paste.push('');
-
-                function setField(field, value, label) {
-                    if (value === null || value === undefined || value === '') {
-                        logs.paste.push('⏭️ ' + label + ' — خالی');
-                        return;
-                    }
-                    scope.model[field] = value;
-                    logs.paste.push('✅ ' + label + ' = ' + value);
-                }
-
-                function setCombo(comboName, textValue, label) {
-                    if (!textValue) {
-                        logs.paste.push('⏭️ ' + label + ' — خالی');
-                        return;
-                    }
-                    var el = modal.querySelector('[name="' + comboName + '"]');
-                    if (!el) { logs.paste.push('⚠️ ' + label + ' — پیدا نشد'); return; }
-
-                    var ngEl = el.closest('[ng-model]') || el;
-                    var s = angular.element(ngEl).scope();
-                    var ngModelAttr = ngEl ? ngEl.getAttribute('ng-model') : null;
-                    var fieldName = ngModelAttr ? ngModelAttr.split('.').pop() : null;
-
-                    if (!s || !fieldName) {
-                        logs.paste.push('⚠️ ' + label + ' — scope پیدا نشد');
-                        return;
-                    }
-
-                    var optionsAttr = el.getAttribute('options') || ngEl.getAttribute('options');
-                    var optionsArray = null;
-
-                    if (optionsAttr && s[optionsAttr]) {
-                        optionsArray = s[optionsAttr];
-                    } else {
-                        for (var key in s) {
-                            if (key.indexOf('comboOption') !== 0) continue;
-                            if (!Array.isArray(s[key])) continue;
-                            var arr = s[key];
-                            for (var i = 0; i < arr.length; i++) {
-                                if (arr[i] && arr[i].value && arr[i].value.trim() === textValue.trim()) {
-                                    optionsArray = arr;
-                                    break;
-                                }
-                            }
-                            if (optionsArray) break;
-                        }
-                    }
-
-                    if (!optionsArray) {
-                        logs.paste.push('⚠️ ' + label + ' — آرایه گزینه‌ها پیدا نشد');
-                        return;
-                    }
-
-                    var foundKey = null;
-                    for (var j = 0; j < optionsArray.length; j++) {
-                        if (optionsArray[j] && optionsArray[j].value &&
-                            optionsArray[j].value.trim() === textValue.trim()) {
-                            foundKey = optionsArray[j].key;
-                            break;
-                        }
-                    }
-
-                    if (foundKey === null) {
-                        logs.paste.push('⚠️ ' + label + ' — "' + textValue + '" پیدا نشد');
-                        return;
-                    }
-
-                    s.$apply(function () {
-                        s.model[fieldName] = foundKey;
-                    });
-
-                    try {
-                        var vi = el.querySelector('input.k-input');
-                        if (vi) vi.value = textValue;
-                        var hi = el.querySelector('input[data-role="combobox"]');
-                        if (hi) hi.value = foundKey;
-                    } catch (e) {}
-
-                    logs.paste.push('✅ ' + label + ' = ' + textValue);
-                }
-
-                logs.paste.push('📝 مشخصات فردی:');
-                scope.$apply(function () {
-                    setField('firstName', data.student.firstName, 'نام');
-                    setField('lastName', data.student.lastName, 'نام خانوادگی');
-                    setField('iDno', data.student.iDno, 'شماره شناسنامه');
-                    setField('birthDate', data.student.birthDate, 'تاریخ تولد');
-                    setField('birthPlace', data.student.birthPlace, 'محل تولد');
-                    setField('issuePlace', data.student.birthPlace, 'محل صدور');
-                });
-
-                logs.paste.push('');
-                logs.paste.push('📝 والدین:');
-                scope.$apply(function () {
-                    setField('fatherNationalCode', data.father.nationalId, 'کد ملی پدر');
-                    setField('fatherBirthDate', data.father.birthDate, 'تاریخ تولد پدر');
-                    setField('fatherMobileNumber', data.father.mobile, 'موبایل پدر');
-                    setField('fatherIDno', data.father.iDno, 'شناسنامه پدر');
-                    setField('fatherIssuePlace', data.father.birthPlace, 'محل صدور پدر');
-                    setField('motherNationalCode', data.mother.nationalId, 'کد ملی مادر');
-                    setField('motherBirthDate', data.mother.birthDate, 'تاریخ تولد مادر');
-                    setField('motherMobileNumber', data.mother.mobile, 'موبایل مادر');
-                });
-
-                logs.paste.push('');
-                logs.paste.push('📝 آدرس و تماس:');
-
-                var homePhone = data.contact.landline;
-                if (!homePhone || homePhone === '' || homePhone === '—') {
-                    homePhone = data.father.mobile;
-                    logs.paste.push('  ℹ️ تلفن منزل خالی → موبایل پدر');
-                }
-
-                scope.$apply(function () {
-                    setField('homeAddress', data.contact.address, 'آدرس');
-                    setField('homePostalCode', data.contact.postalCode, 'کد پستی');
-                    setField('homeTelephone', homePhone, 'تلفن منزل');
-                    setField('studentMobileGoverment', data.contact.mobile, 'موبایل درگاه');
-                    setField('studentMobileNumber', data.contact.mobile, 'موبایل شاد');
-                    setField('fatherWorkAddress', data.father.workplace, 'آدرس کار پدر');
-                    setField('motherWorkAddress', data.mother.workplace, 'آدرس کار مادر');
-                });
-
-                logs.paste.push('');
-                logs.paste.push('📝 کمبوباکس‌ها:');
-                setCombo('جنسیت', data.student.gender, 'جنسیت');
-                setCombo('ملیت', 'ایران', 'ملیت');
-                setCombo('ملیت پدر', 'ایران', 'ملیت پدر');
-                setCombo('ملیت مادر', 'ایران', 'ملیت مادر');
-                setCombo('مدرک تحصیلی پدر', data.father.education, 'مدرک پدر');
-                setCombo('مدرک تحصیلی مادر', data.mother.education, 'مدرک مادر');
-                setCombo('شغل پدر', data.father.occupation, 'شغل پدر');
-                setCombo('شغل مادر', data.mother.occupation, 'شغل مادر');
-
-                logs.paste.push('');
-                logs.paste.push('📝 اطلاعات تکمیلی:');
-
-                var tabs = modal.querySelectorAll('.nav-tabs a');
-                var targetTab = null;
-                for (var t = 0; t < tabs.length; t++) {
-                    if (tabs[t].textContent.trim() === 'اطلاعات تکمیلی') {
-                        targetTab = tabs[t];
-                        break;
-                    }
-                }
-
-                function finalize() {
-                    scope.$apply();
-
-                    deleteFromStorage(sidaNationalId);
-                    updateStatus();
-
-                    logs.paste.push('');
-                    logs.paste.push('✅ تکمیل شد و از انبار حذف شد');
-                    renderLog();
-                    showToast('انجام شد', 'success');
-                }
-
-                if (targetTab) {
-                    targetTab.click();
-                    setTimeout(function () {
-                        setCombo('نوع موجودیت دانش آموز', 'عادی', 'نوع موجودیت');
-                        setCombo('دین', 'مسلمان', 'دین');
-                        setCombo('مذهب', 'تشیع', 'مذهب');
-                        setTimeout(finalize, 200);
-                    }, 800);
-                } else {
-                    finalize();
-                }
-
-            } catch (e) {
-                logs.paste.push('❌ خطا: ' + e.message);
-                renderLog();
-                showToast('خطا: ' + e.message, 'error');
-                console.error(e);
+                subTabTransferred.style.background = '#10b981'; subTabTransferred.style.color = 'white';
+                subTabStorage.style.background = 'rgba(255,255,255,0.05)'; subTabStorage.style.color = '#94a3b8';
+                renderTransferredList();
             }
         }
-
+        
+        function refreshCurrentSubTab() {
+            if (currentSubTab === 'storage') renderStorageList(searchBox.value);
+            else renderTransferredList();
+        }
+        
         function renderStorageList(filter) {
             var s = getStorage();
             var keys = Object.keys(s);
-
+            
             if (filter) {
                 filter = filter.trim().toLowerCase();
-                keys = keys.filter(function (k) {
+                keys = keys.filter(function(k) {
                     var item = s[k];
                     var d = (item.data || item).student || {};
                     var name = ((d.firstName || '') + ' ' + (d.lastName || '')).toLowerCase();
                     return k.indexOf(filter) > -1 || name.indexOf(filter) > -1;
                 });
             }
-
+            
             if (keys.length === 0) {
-                storageList.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;font-size:15px;">خالی</div>';
+                var msg = getStorageCount() === 0 ?
+                    'هنوز دانش‌آموزی به انبار اضافه نشده است.<br><br>👈 از تب «عملیات» استفاده کنید' :
+                    'نتیجه‌ای یافت نشد';
+                storageList.innerHTML = '<div style="color:#64748b;text-align:center;padding:30px 20px;font-size:14px;line-height:2;">' + msg + '</div>';
                 return;
             }
-
+            
             var html = '';
-            keys.forEach(function (k) {
+            keys.forEach(function(k) {
                 var item = s[k];
                 var d = (item.data || item).student || {};
                 var name = (d.firstName || '?') + ' ' + (d.lastName || '?');
-
-                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin-bottom:6px;background:#1e293b;border-radius:8px;border-right:4px solid #764ba2;">';
-                html += '<div>';
-                html += '<div style="font-size:15px;font-weight:bold;color:#e2e8f0;">' + name + '</div>';
-                html += '<div style="font-size:13px;color:#94a3b8;">کد ملی: ' + k + '</div>';
+                
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;margin-bottom:8px;background:#1e293b;border-radius:8px;border-right:4px solid #3b82f6;gap:6px;">';
+                html += '<div style="flex:1;min-width:0;overflow:hidden;">';
+                html += '<div style="font-size:14px;font-weight:bold;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(name) + '</div>';
+                html += '<div style="font-size:12px;color:#94a3b8;direction:ltr;text-align:right;">' + k + '</div>';
                 html += '</div>';
-                html += '<button class="pfb-delete-btn" data-key="' + k + '" style="background:#dc2626;color:white;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px;font-family:inherit;">🗑️ حذف</button>';
+                html += '<button class="pfb-transfer-btn" data-key="' + k + '" style="background:#0ea5e9;color:white;border:none;border-radius:6px;padding:8px 12px;cursor:pointer;font-size:14px;font-family:inherit;flex-shrink:0;touch-action:manipulation;font-weight:bold;" title="انتقال خودکار">📤</button>';
+                html += '<button class="pfb-delete-btn" data-key="' + k + '" style="background:#dc2626;color:white;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:14px;font-family:inherit;flex-shrink:0;touch-action:manipulation;" title="حذف">🗑️</button>';
                 html += '</div>';
             });
-
+            
             storageList.innerHTML = html;
-
-            storageList.querySelectorAll('.pfb-delete-btn').forEach(function (btn) {
-                btn.onclick = function () {
+            
+            storageList.querySelectorAll('.pfb-transfer-btn').forEach(function(b) {
+                b.onclick = function(e) {
+                    e.stopPropagation();
                     var key = this.getAttribute('data-key');
-                    if (confirm('حذف دانش‌آموز با کد ملی ' + key + '؟')) {
+                    transferStudent(key, this, logMsg);
+                };
+            });
+            
+            storageList.querySelectorAll('.pfb-delete-btn').forEach(function(b) {
+                b.onclick = function(e) {
+                    e.stopPropagation();
+                    var key = this.getAttribute('data-key');
+                    if (confirm('حذف دانش‌آموز با کد ملی ' + key + ' از انبار؟')) {
                         deleteFromStorage(key);
                         updateStatus();
                         renderStorageList(searchBox.value);
                         showToast('حذف شد', 'success');
+                        logMsg('🗑️ حذف: ' + key, 'warning');
                     }
                 };
             });
         }
-
-        btnPaste.onclick = pasteIntoSida;
-
-        btnView.onclick = function () {
-            renderStorageList('');
-            searchBox.value = '';
+        
+        function renderTransferredList() {
+            var transferred = getTransferred();
+            var keys = Object.keys(transferred);
+            
+            if (keys.length === 0) {
+                storageList.innerHTML = '<div style="color:#64748b;text-align:center;padding:30px 20px;font-size:14px;line-height:2;">هنوز دانش‌آموزی منتقل نشده است</div>';
+                return;
+            }
+            
+            keys.sort(function(a, b) { return (transferred[b].transferredAt || 0) - (transferred[a].transferredAt || 0); });
+            
+            var html = '';
+            keys.forEach(function(k) {
+                var item = transferred[k];
+                var d = (item.data || {}).student || {};
+                var name = (d.firstName || '?') + ' ' + (d.lastName || '?');
+                var date = new Date(item.transferredAt || Date.now());
+                var dateStr = date.toLocaleDateString('fa-IR') + ' ' + date.toLocaleTimeString('fa-IR').substring(0, 5);
+                
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;margin-bottom:8px;background:#1e293b;border-radius:8px;border-right:4px solid #10b981;gap:6px;">';
+                html += '<div style="flex:1;min-width:0;overflow:hidden;">';
+                html += '<div style="font-size:14px;font-weight:bold;color:#10b981;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ ' + escapeHtml(name) + '</div>';
+                html += '<div style="font-size:12px;color:#94a3b8;direction:ltr;text-align:right;">' + k + '</div>';
+                html += '<div style="font-size:11px;color:#64748b;margin-top:2px;">' + dateStr + '</div>';
+                html += '</div>';
+                html += '<button class="pfb-undo-btn" data-key="' + k + '" style="background:#f59e0b;color:white;border:none;border-radius:6px;padding:8px 12px;cursor:pointer;font-size:14px;font-family:inherit;flex-shrink:0;touch-action:manipulation;font-weight:bold;" title="بازگردانی به انبار">↩️</button>';
+                html += '</div>';
+            });
+            
+            storageList.innerHTML = html;
+            
+            storageList.querySelectorAll('.pfb-undo-btn').forEach(function(b) {
+                b.onclick = function(e) {
+                    e.stopPropagation();
+                    var key = this.getAttribute('data-key');
+                    var item = transferred[key];
+                    var d = (item.data || {}).student || {};
+                    var name = (d.firstName || '') + ' ' + (d.lastName || '');
+                    if (confirm('بازگردانی «' + name + '» به انبار؟\n\n(از لیست منتقل‌شده‌ها حذف می‌شود)')) {
+                        undoTransfer(key);
+                        updateStatus();
+                        renderTransferredList();
+                        showToast('↩️ به انبار بازگشت', 'success');
+                        logMsg('↩️ بازگردانی: ' + name, 'warning');
+                    }
+                };
+            });
+        }
+        
+        // Register refresh callback
+        panelRefreshCallback = function() {
+            updateStatus();
+            refreshCurrentSubTab();
         };
-
-        btnClearAll.onclick = function () {
-            if (confirm('⚠️ کل انبار و لیست دانش‌آموزان پاک بشه؟ این عمل برگشت‌پذیر نیست!')) {
+        
+        // ===== Event Bindings =====
+        tabActions.onclick = function() { switchTab('actions'); };
+        tabStorage.onclick = function() { switchTab('storage'); };
+        tabLog.onclick = function() { switchTab('log'); };
+        subTabStorage.onclick = function() { switchSubTab('storage'); };
+        subTabTransferred.onclick = function() { switchSubTab('transferred'); };
+        
+        searchBox.oninput = function() { 
+            if (currentSubTab === 'storage') renderStorageList(this.value); 
+        };
+        
+        btnExport.onclick = function() { exportToExcel(); };
+        
+        btnClearAll.onclick = function() {
+            if (confirm('⚠️ همه چیز پاک شود؟ (انبار + منتقل‌شده‌ها)')) {
                 clearStorage();
-                clearStudentList();
+                try { localStorage.removeItem(TRANSFERRED_KEY); } catch (e) {}
                 updateStatus();
-                renderStorageList('');
-                showToast('انبار و لیست پاک شد', 'success');
+                refreshCurrentSubTab();
+                showToast('همه چیز پاک شد', 'success');
+                logMsg('🗑️ انبار و منتقل‌شده‌ها پاک شد', 'warning');
             }
         };
-
-        btnClearLog.onclick = function () {
-            logs.paste = [];
+        
+        btnCopyLog.onclick = function() { copyLogToClipboard(getLogText()); };
+        btnWordLog.onclick = function() { exportLogToWord(logs.transfer); };
+        btnClearLog.onclick = function() {
+            logs.transfer = [];
             renderLog();
             showToast('گزارش پاک شد', 'info');
         };
-
-        btnCopyLog.onclick = function () {
-            copyLogToClipboard(getLogText());
+        
+        // ===== Import Clipboard =====
+        btnImportClipboard.onclick = function() {
+            logs.transfer = [];
+            logMsg('📥 شروع دریافت از بینا...', 'info');
+            
+            function processText(text) {
+                if (!text || text.trim() === '') {
+                    logMsg('❌ کلیپ‌بورد خالیه', 'error');
+                    switchTab('log');
+                    showToast('کلیپ‌بورد خالیه!', 'error');
+                    return;
+                }
+                var data;
+                try { data = JSON.parse(text); }
+                catch (e) {
+                    logMsg('❌ JSON نامعتبر: ' + e.message, 'error');
+                    logMsg('👉 اول تو بینا «📋 کپی JSON برای سیدا» را بزنید', 'info');
+                    switchTab('log');
+                    showToast('JSON نامعتبر!', 'error');
+                    return;
+                }
+                var keys = Object.keys(data);
+                if (keys.length === 0) {
+                    logMsg('❌ داده خالیه', 'error');
+                    switchTab('log');
+                    showToast('داده خالیه!', 'error');
+                    return;
+                }
+                logMsg('📦 دریافت شد: ' + keys.length + ' دانش‌آموز', 'info');
+                
+                var existing = getStorage();
+                var addedCount = 0, updatedCount = 0;
+                keys.forEach(function(k) {
+                    if (existing[k]) updatedCount++;
+                    else addedCount++;
+                    existing[k] = data[k];
+                });
+                
+                saveStorage(existing);
+                logMsg('✅ ' + addedCount + ' جدید + ' + updatedCount + ' به‌روزرسانی', 'success');
+                updateStatus();
+                switchTab('storage');
+                switchSubTab('storage');
+                showToast('✅ ' + keys.length + ' دانش‌آموز وارد شد', 'success');
+            }
+            
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                navigator.clipboard.readText().then(function(text) {
+                    processText(text);
+                }).catch(function(err) {
+                    logMsg('⚠️ clipboard API خطا: ' + err.message, 'warning');
+                    var text = prompt('JSON را اینجا پیست کنید:');
+                    if (text) processText(text);
+                });
+            } else {
+                var text = prompt('JSON را اینجا پیست کنید:');
+                if (text) processText(text);
+            }
         };
-
-        btnWordLog.onclick = function () {
-            exportLogToWord(logs.paste);
-            showToast('Word دانلود شد', 'success');
-        };
-
-        searchBox.oninput = function () {
-            renderStorageList(this.value);
-        };
-
+        
+        // ===== Min/Reset/Close =====
         var isMinimized = false;
-
-        document.getElementById('pfb-min').onclick = function (e) {
+        
+        document.getElementById('pfb-min').onclick = function(e) {
             e.stopPropagation();
             isMinimized = !isMinimized;
             if (isMinimized) {
                 body.style.display = 'none';
                 status.style.display = 'none';
                 panel.style.width = '280px';
+                panel.style.right = 'auto';
                 this.textContent = '➕';
             } else {
                 body.style.display = 'flex';
                 status.style.display = 'block';
                 panel.style.width = '460px';
+                panel.style.right = 'auto';
                 this.textContent = '➖';
             }
         };
-
-        document.getElementById('pfb-reset').onclick = function (e) {
+        
+        document.getElementById('pfb-reset').onclick = function(e) {
             e.stopPropagation();
-            logs.paste = [];
+            logs.transfer = [];
             renderLog();
             switchTab('actions');
             if (isMinimized) {
                 body.style.display = 'flex';
                 status.style.display = 'block';
                 panel.style.width = '460px';
+                panel.style.right = 'auto';
                 document.getElementById('pfb-min').textContent = '➖';
                 isMinimized = false;
             }
@@ -7678,58 +8283,21 @@ function extractClassListTool() {
             panel.style.bottom = 'auto';
             showToast('پنل ریست شد', 'info');
         };
-
-        document.getElementById('pfb-close').onclick = function (e) {
+        
+        document.getElementById('pfb-close').onclick = function(e) {
             e.stopPropagation();
+            panelRefreshCallback = null;
             panel.remove();
         };
-
-        // درگ پنل
-        var isDragging = false;
-        var dragOffsetX = 0;
-        var dragOffsetY = 0;
-
-        header.addEventListener('mousedown', function (e) {
-            if (e.target.id === 'pfb-min' || e.target.id === 'pfb-reset' || e.target.id === 'pfb-close') {
-                return;
-            }
-            if (e.button !== 0) return;
-
-            isDragging = true;
-            var rect = panel.getBoundingClientRect();
-            dragOffsetX = e.clientX - rect.left;
-            dragOffsetY = e.clientY - rect.top;
-
-            panel.style.right = 'auto';
-            panel.style.bottom = 'auto';
-            document.body.style.userSelect = 'none';
-            e.preventDefault();
-        });
-
-        document.addEventListener('mousemove', function (e) {
-            if (!isDragging) return;
-
-            var newLeft = e.clientX - dragOffsetX;
-            var newTop = e.clientY - dragOffsetY;
-
-            var maxX = window.innerWidth - panel.offsetWidth;
-            var maxY = window.innerHeight - panel.offsetHeight;
-            newLeft = Math.max(0, Math.min(newLeft, maxX));
-            newTop = Math.max(0, Math.min(newTop, maxY));
-
-            panel.style.left = newLeft + 'px';
-            panel.style.top = newTop + 'px';
-        });
-
-        document.addEventListener('mouseup', function () {
-            if (isDragging) {
-                isDragging = false;
-                document.body.style.userSelect = '';
-            }
-        });
-
-        switchTab('actions');
+        
+        // ===== Initial =====
+        updateStatus();
+        switchSubTab('storage');
+        logMsg('پنل آماده است. از تب «عملیات» شروع کنید', 'info');
     }
+    
+    createPanel();
+}
        // ✅ فقط روی دستگاه‌های لمسی یا موبایل اجرا بشه
   if (!('ontouchstart' in window) && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) return;
 
