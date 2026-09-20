@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📱 داشبورد موبایل ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.3
+// @version      15.5
 // @description  نسخه موبایل داشبورد15 ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -4124,8 +4124,8 @@ function doSearch(){
 
         createPanel();
     }
-	
- // ==================== ابزار ۱۰: استخراج لیست کلاسی (نسخه API) ====================
+	 
+   // ==================== ابزار ۱۰: استخراج لیست کلاسی (نسخه API) ====================
 function extractClassListTool() {
     if (document.getElementById('extractPanel')) {
         document.getElementById('extractPanel').remove();
@@ -4227,7 +4227,6 @@ function extractClassListTool() {
                     skip: 0,
                     page: 1,
                     pageSize: 500,
-                    // ✅ دقیقاً همون sort که سیدا استفاده می‌کنه
                     sort: [{ field: 'id', dir: 'asc' }],
                     filter: {
                         logic: 'and',
@@ -4244,8 +4243,6 @@ function extractClassListTool() {
 
             let json = await response.json();
             let items = (json.data && json.data.data) || json.data || [];
-
-            // ✅ بدون sort دستی — ترتیب API مثل سیدا
 
             return items.map(function(item, idx) {
                 return {
@@ -4370,35 +4367,332 @@ function extractClassListTool() {
         }
     }
 
+    // ============================================================
+    //  🆕 روش جدید: استفاده از Angular خود سیدا
+    //  - برای مواقعی که تأیید نهایی کلاس‌بندی زده نشده
+    // ============================================================
+    async function extractByClassesNew() {
+        if (isRunning) { showStatus('⚠️ در حال اجراست...', 'error'); return; }
+
+        let grades = findGradesAndClasses();
+        if (grades.length === 0) {
+            showStatus('❌ ساختار پایه‌ها پیدا نشد!', 'error');
+            alert('❌ ساختار پایه‌ها پیدا نشد!\n\nمطمئن شو تو صفحه «کلاس‌های مدرسه» (#/SchoolClasses) هستی.');
+            return;
+        }
+
+        let totalClasses = grades.reduce((sum, g) => sum + g.classNames.length, 0);
+
+        if (!confirm('📊 (روش هوشمند) ' + totalClasses + ' کلاس در ' + grades.length + ' پایه\n\n' +
+                     'روش کار:\n' +
+                     '1. برای هر پایه، مودال تخصیص باز می‌شه\n' +
+                     '2. برای هر کلاس، اطلاعات از خود سیدا دریافت می‌شه\n' +
+                     '3. کلاس‌ها به لیست اضافه می‌شن\n\n' +
+                     '⚠️ در طول عملیات، صفحه رو دست نزنید و کلیک نکنید\n\n' +
+                     'ادامه؟')) {
+            return;
+        }
+
+        isRunning = true;
+        document.getElementById('btnCollectAll').disabled = true;
+        document.getElementById('btnClassExtractNew').disabled = true;
+        document.getElementById('btnStop').style.display = 'block';
+        allClasses = [];
+
+        let currentClassNum = 0;
+        let successClasses = 0;
+        let emptyClasses = 0;
+        let errorClasses = 0;
+        let errorDetails = [];
+
+        for (let gi = 0; gi < grades.length; gi++) {
+            if (!isRunning) break;
+
+            let g = grades[gi];
+            showStatus('⏳ پایه ' + g.gradeName + ' (' + (gi + 1) + '/' + grades.length + ')...', 'info');
+
+            // پیدا کردن ردیف این پایه
+            let gradeRow = null;
+            let allRows = document.querySelectorAll('table.table-bordered tbody tr');
+            for (let r = 0; r < allRows.length; r++) {
+                let row = allRows[r];
+                let btn = row.querySelector('button[ng-click*="addStudents"]');
+                if (!btn) continue;
+                try {
+                    let s = angular.element(row).scope();
+                    if (s && s.x && s.x.gradeTypeId === g.gradeTypeId) {
+                        gradeRow = row;
+                        break;
+                    }
+                } catch(e) {}
+            }
+
+            if (!gradeRow) {
+                errorDetails.push(g.gradeName + ': ردیف پایه پیدا نشد');
+                errorClasses += g.classNames.length;
+                continue;
+            }
+
+            let assignBtn = gradeRow.querySelector('button[ng-click*="addStudents"]');
+            if (!assignBtn) {
+                errorDetails.push(g.gradeName + ': دکمه تخصیص پیدا نشد');
+                errorClasses += g.classNames.length;
+                continue;
+            }
+
+            // اگه مودال قبلی بازه، ببندش
+            let existingModal = document.querySelector('[uib-modal-window]');
+            if (existingModal) {
+                try {
+                    let allBtns = existingModal.querySelectorAll('button');
+                    for (let b of allBtns) {
+                        let txt = (b.textContent || '').trim();
+                        if (txt === 'بستن' || txt === 'انصراف') { b.click(); break; }
+                    }
+                } catch(e) {}
+                await sleep(1500);
+            }
+
+            assignBtn.click();
+
+            // انتظار برای باز شدن modal
+            let modal = null;
+            let scope = null;
+            for (let wait = 0; wait < 30; wait++) {
+                await sleep(500);
+                if (!isRunning) break;
+                modal = document.querySelector('[uib-modal-window]');
+                if (modal) {
+                    try {
+                        scope = angular.element(modal).scope();
+                        if (scope && scope.model && scope.comboOptionClassNames && scope.kendoStudents) {
+                            break;
+                        }
+                    } catch(e) {}
+                }
+            }
+
+            if (!modal || !scope || !scope.comboOptionClassNames) {
+                errorDetails.push(g.gradeName + ': مودال باز نشد');
+                errorClasses += g.classNames.length;
+                continue;
+            }
+
+            await sleep(2000);
+
+            // برای هر کلاس این پایه
+            let classes = scope.comboOptionClassNames.slice();
+
+            for (let ci = 0; ci < classes.length; ci++) {
+                if (!isRunning) break;
+
+                let cls = classes[ci];
+                currentClassNum++;
+                showStatus('⏳ (' + currentClassNum + '/' + totalClasses + ') ' + cls.name + '...', 'info');
+
+                try {
+                    // تغییر به این کلاس
+                    if (scope.$$phase) {
+                        scope.model.classNameId = cls.id;
+                    } else {
+                        scope.$apply(function () {
+                            scope.model.classNameId = cls.id;
+                        });
+                    }
+
+                    scope.onChangeClassName();
+                    await sleep(2500);
+
+                    if (!isRunning) break;
+
+                    let data = scope.kendoStudents.dataSource.data();
+                    let rawStudents = data.map(function (item) {
+                        return item.toJSON ? item.toJSON() : item;
+                    });
+
+                    if (!rawStudents || rawStudents.length === 0) {
+                        emptyClasses++;
+                        allClasses.push({
+                            className: cls.name,
+                            gradeName: g.gradeName,
+                            classId: cls.id,
+                            gradeTypeId: g.gradeTypeId,
+                            students: []
+                        });
+                        updatePanel();
+                        sessionStorage.setItem('extracted_classes_data', JSON.stringify(allClasses));
+                        continue;
+                    }
+
+                    let classStudents = rawStudents.map(function (item, idx) {
+                        return {
+                            row: idx + 1,
+                            code: String(item.studentId || item.nationalCode || '').trim(),
+                            name: (item.firstName || '').trim(),
+                            family: (item.lastName || '').trim()
+                        };
+                    }).filter(function (s) { return s.code && s.code.length > 3; });
+
+                    allClasses.push({
+                        className: cls.name,
+                        gradeName: g.gradeName,
+                        classId: cls.id,
+                        gradeTypeId: g.gradeTypeId,
+                        students: classStudents
+                    });
+
+                    successClasses++;
+                    updatePanel();
+                    sessionStorage.setItem('extracted_classes_data', JSON.stringify(allClasses));
+                    await sleep(300);
+
+                } catch (e) {
+                    console.error('خطا در کلاس ' + cls.name + ':', e);
+                    errorClasses++;
+                    errorDetails.push(cls.name + ': ' + e.message);
+                }
+            }
+
+            // بستن مودال این پایه
+            try {
+                let closeBtn = null;
+                let allBtns = modal.querySelectorAll('button');
+                for (let b of allBtns) {
+                    let txt = (b.textContent || '').trim();
+                    if (txt === 'بستن' || txt === 'انصراف') {
+                        closeBtn = b;
+                        break;
+                    }
+                }
+                if (!closeBtn) {
+                    closeBtn = modal.querySelector('button[ng-click*="closePopup"], button[ng-click*="cancel"]');
+                }
+                if (closeBtn) closeBtn.click();
+            } catch (e) {
+                console.warn('خطا در بستن مودال:', e);
+            }
+
+            await sleep(2000);
+        }
+
+        isRunning = false;
+        document.getElementById('btnCollectAll').disabled = false;
+        document.getElementById('btnClassExtractNew').disabled = false;
+        document.getElementById('btnStop').style.display = 'none';
+
+        let totalStudents = allClasses.reduce((acc, cls) => acc + cls.students.length, 0);
+        showStatus('✅ تمام! ' + successClasses + ' کلاس، ' + totalStudents + ' دانش‌آموز', 'success');
+
+        let msg = '✅ استخراج لیست کلاسی تمام شد!\n\n' +
+                  '📊 کلاس‌های موفق: ' + successClasses + '\n' +
+                  '👥 دانش‌آموزان: ' + totalStudents;
+        if (emptyClasses > 0) msg += '\n⚪ کلاس‌های خالی: ' + emptyClasses;
+        if (errorClasses > 0) msg += '\n❌ کلاس‌های با خطا: ' + errorClasses;
+        if (errorDetails.length > 0) {
+            msg += '\n\nخطاها:\n' + errorDetails.slice(0, 5).join('\n');
+        }
+        alert(msg);
+    }
+
+    // ==================== راهنمای ابزار ====================
+    function showHelp() {
+        let existing = document.getElementById('sidaHelpOverlay');
+        if (existing) existing.remove();
+
+        let overlay = document.createElement('div');
+        overlay.id = 'sidaHelpOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.75);z-index:9999999;display:flex;align-items:center;justify-content:center;font-family:Tahoma,sans-serif;direction:rtl;padding:20px;box-sizing:border-box;';
+
+        overlay.innerHTML =
+            '<div style="background:white;color:#333;border-radius:12px;max-width:620px;width:100%;max-height:90vh;overflow-y:auto;padding:25px;box-shadow:0 10px 40px rgba(0,0,0,0.5);font-size:16px;line-height:2;position:relative;">' +
+                '<button id="closeHelp" style="position:absolute;top:12px;left:12px;background:#ef4444;color:white;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:20px;font-weight:bold;">✕</button>' +
+
+                '<h2 style="color:#3ecfe0;text-align:center;margin-bottom:20px;font-size:22px;border-bottom:3px solid #3ecfe0;padding-bottom:12px;">📖 راهنمای استفاده</h2>' +
+
+                '<div style="background:#eff6ff;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #3b82f6;">' +
+                    '<h3 style="color:#1e40af;margin-bottom:10px;font-size:18px;">📥 استخراج لیست کلاسی</h3>' +
+                    '<p>این ابزار دو حالت داره، بسته به اینکه تأیید نهایی کلاس‌بندی زده شده یا نه:</p>' +
+                '</div>' +
+
+                '<div style="background:#ecfdf5;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #10b981;">' +
+                    '<h3 style="color:#065f46;margin-bottom:10px;font-size:18px;">✅ اگر تأیید نهایی کلاس‌بندی زده شده:</h3>' +
+                    '<ul style="margin-right:20px;margin-top:8px;">' +
+                        '<li>از دکمهٔ سبز «📋 لیست کلاسی» استفاده کن</li>' +
+                        '<li>کلاس‌ها مستقیماً از سرور دریافت می‌شن</li>' +
+                        '<li>سریع‌تر انجام می‌شه</li>' +
+                    '</ul>' +
+                '</div>' +
+
+                '<div style="background:#fff7ed;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #f59e0b;">' +
+                    '<h3 style="color:#9a3412;margin-bottom:10px;font-size:18px;">⚠️ اگر تأیید نهایی کلاس‌بندی زده نشده:</h3>' +
+                    '<ul style="margin-right:20px;margin-top:8px;">' +
+                        '<li>از دکمهٔ نارنجی «📋 لیست کلاسی» استفاده کن</li>' +
+                        '<li>کد خودکار مودال تخصیص رو باز می‌کنه و کلاس‌ها رو یکی‌یکی دریافت می‌کنه</li>' +
+                        '<li>در طول عملیات، صفحه رو دست نزن</li>' +
+                    '</ul>' +
+                '</div>' +
+
+                '<div style="background:#fef2f2;padding:14px;border-radius:8px;border-right:4px solid #ef4444;">' +
+                    '<h3 style="color:#991b1b;margin-bottom:10px;font-size:18px;">⚠️ نکات مهم</h3>' +
+                    '<ul style="margin-right:20px;">' +
+                        '<li>صفحه باید در قسمت «کلاس‌بندی» (#/SchoolClasses) باشه</li>' +
+                        '<li>بعد از جمع‌آوری، دکمهٔ «📥 دانلود همه» رو بزن</li>' +
+                        '<li>برای توقف، دکمهٔ «⛔ توقف» رو بزن</li>' +
+                        '<li>در طول عملیات مرورگر رو نبند</li>' +
+                    '</ul>' +
+                '</div>' +
+
+                '<div style="text-align:center;margin-top:20px;padding-top:15px;border-top:2px dashed #ddd;color:#3ecfe0;font-weight:bold;font-size:18px;">' +
+                    '🎨 طراح: یوسف معصومی' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+
+        document.getElementById('closeHelp').onclick = function() {
+            overlay.remove();
+        };
+        overlay.onclick = function(e) {
+            if (e.target === overlay) overlay.remove();
+        };
+    }
+
     function createPanel() {
         var panel = document.createElement('div');
         panel.id = 'extractPanel';
-        panel.style.cssText = 'position:fixed;top:20px;left:20px;background:#1a1d2e;border:2px solid #3ecfe0;border-radius:12px;padding:16px 18px;width:400px;max-width:90vw;max-height:90vh;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:Tahoma,sans-serif;direction:rtl;font-size:13px;color:#e8e8f0;overflow-y:auto;';
+        panel.style.cssText = 'position:fixed;top:20px;left:20px;background:#1a1d2e;border:2px solid #3ecfe0;border-radius:12px;padding:12px 14px;width:380px;max-width:90vw;max-height:90vh;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:Tahoma,sans-serif;direction:rtl;font-size:14px;color:#e8e8f0;overflow-y:auto;';
 
         panel.innerHTML =
-            '<div id="extractHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #3ecfe0;user-select:none;cursor:move;">' +
+            '<div id="extractHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #3ecfe0;user-select:none;cursor:move;">' +
                 '<strong style="color:#3ecfe0;font-size:15px;">📋 استخراج لیست کلاسی (API)</strong>' +
-                '<button id="btnClose" style="background:none;border:none;cursor:pointer;font-size:18px;color:#999;">✕</button>' +
+                '<div style="display:flex;align-items:center;gap:8px;">' +
+                    '<button id="btnHelp" style="background:none;border:none;cursor:pointer;font-size:18px;color:#6b7280;padding:0;" title="راهنمای ابزار">📖</button>' +
+                    '<button id="btnClose" style="background:none;border:none;cursor:pointer;font-size:18px;color:#999;padding:0;">✕</button>' +
+                '</div>' +
             '</div>' +
-            '<div style="background:#0f1117;padding:12px;border-radius:8px;margin-bottom:12px;text-align:center;">' +
-                '<div style="font-size:12px;color:#888899;">تعداد کل دانش‌آموزان جمع‌آوری شده:</div>' +
-                '<div id="totalCount" style="font-size:28px;font-weight:bold;color:#3ecfe0;">0</div>' +
-                '<div id="extractStatus" style="font-size:11px;color:#888899;margin-top:6px;">آماده شروع...</div>' +
+            '<div style="background:#0f1117;padding:10px;border-radius:8px;margin-bottom:10px;text-align:center;">' +
+                '<div style="font-size:13px;color:#888899;">تعداد کل دانش‌آموزان جمع‌آوری شده:</div>' +
+                '<div id="totalCount" style="font-size:26px;font-weight:bold;color:#3ecfe0;">0</div>' +
+                '<div id="extractStatus" style="font-size:13px;color:#888899;margin-top:6px;">آماده شروع...</div>' +
             '</div>' +
-            '<button id="btnCollectAll" style="width:100%;background:#8b5cf6;color:white;border:none;padding:12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;margin-bottom:8px;">🚀 استخراج همه پایه‌ها و کلاس‌ها</button>' +
-            '<button id="btnStop" style="width:100%;background:#ef4444;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;display:none;margin-bottom:8px;">⛔ توقف</button>' +
-            '<button id="btnDownloadAll" style="width:100%;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;margin-bottom:8px;">📥 دانلود همه (Word)</button>' +
-            '<button id="btnReset" style="background:transparent;color:#888899;border:1px solid #2a2d42;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;width:100%;margin-bottom:12px;">🔄 پاک کردن همه</button>' +
-            '<div style="font-size:12px;color:#888899;margin-bottom:6px;">کلاس‌های جمع‌آوری شده:</div>' +
-            '<div id="classList" style="background:#0f1117;border-radius:8px;padding:8px;max-height:300px;overflow-y:auto;font-size:12px;">' +
+            '<div style="background:#ecfdf5;padding:8px;border-radius:6px;font-size:14px;color:#065f46;text-align:center;border:1px solid #a7f3d0;margin-bottom:6px;">✅ اگه تأیید نهایی کلاس‌بندی زدی:</div>' +
+            '<button id="btnCollectAll" style="width:100%;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;margin-bottom:8px;">📋 لیست کلاسی</button>' +
+            '<div style="background:#fff7ed;padding:8px;border-radius:6px;font-size:14px;color:#9a3412;text-align:center;border:1px solid #fed7aa;margin-bottom:6px;">⚠️ اگه تأیید نهایی کلاس‌بندی نزدی:</div>' +
+            '<button id="btnClassExtractNew" style="width:100%;background:#f59e0b;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;margin-bottom:8px;">📋 لیست کلاسی</button>' +
+            '<button id="btnStop" style="width:100%;background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;display:none;margin-bottom:8px;font-size:14px;">⛔ توقف</button>' +
+            '<button id="btnDownloadAll" style="width:100%;background:#10b981;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;margin-bottom:8px;font-size:14px;">📥 دانلود همه (Word)</button>' +
+            '<button id="btnReset" style="background:transparent;color:#888899;border:1px solid #2a2d42;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:14px;width:100%;margin-bottom:10px;">🔄 پاک کردن همه</button>' +
+            '<div style="font-size:14px;color:#888899;margin-bottom:6px;">کلاس‌های جمع‌آوری شده:</div>' +
+            '<div id="classList" style="background:#0f1117;border-radius:8px;padding:8px;max-height:300px;overflow-y:auto;font-size:14px;">' +
                 '<div style="color:#888;text-align:center;padding:10px;">هنوز کلاسی جمع‌آوری نشده است.</div>' +
             '</div>';
 
         document.body.appendChild(panel);
-        makeDraggableByTouch(panel, document.getElementById('extractHeader'));
+
         var header = document.getElementById('extractHeader');
         var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
         header.onmousedown = function(e) {
+            if (e.target.id === 'btnHelp' || e.target.id === 'btnClose') return;
             e = e || window.event;
             e.preventDefault();
             pos3 = e.clientX;
@@ -4420,7 +4714,7 @@ function extractClassListTool() {
             window.removeEventListener('mouseup', closeDrag);
             window.removeEventListener('mousemove', dragMove);
         }
-
+       makeDraggableByTouch(panel, header);  
         try {
             var saved = sessionStorage.getItem('extracted_classes_data');
             if (saved) allClasses = JSON.parse(saved);
@@ -4432,6 +4726,11 @@ function extractClassListTool() {
             panel.remove();
         };
 
+        document.getElementById('btnHelp').onclick = function() {
+            showHelp();
+        };
+
+        // ===== دکمه سبز (روش قدیم - از API) =====
         document.getElementById('btnCollectAll').onclick = async function() {
             if (isRunning) { showStatus('⚠️ در حال اجراست...', 'error'); return; }
 
@@ -4444,6 +4743,7 @@ function extractClassListTool() {
 
             isRunning = true;
             document.getElementById('btnCollectAll').disabled = true;
+            document.getElementById('btnClassExtractNew').disabled = true;
             document.getElementById('btnStop').style.display = 'block';
             allClasses = [];
 
@@ -4476,10 +4776,16 @@ function extractClassListTool() {
 
             isRunning = false;
             document.getElementById('btnCollectAll').disabled = false;
+            document.getElementById('btnClassExtractNew').disabled = false;
             document.getElementById('btnStop').style.display = 'none';
 
             let totalStudents = allClasses.reduce((acc, cls) => acc + cls.students.length, 0);
             showStatus('✅ تمام! ' + allClasses.length + ' کلاس، ' + totalStudents + ' دانش‌آموز', 'success');
+        };
+
+        // ===== دکمه نارنجی (روش جدید - Angular) =====
+        document.getElementById('btnClassExtractNew').onclick = function() {
+            extractByClassesNew();
         };
 
         document.getElementById('btnStop').onclick = function() {
@@ -4515,7 +4821,9 @@ function extractClassListTool() {
 
     createPanel();
 }
-// ==================== ابزار ۱۱: استخراج مشخصات (نسخه API) ====================
+    
+  
+ // ==================== ابزار ۱۱: استخراج مشخصات (نسخه API) ====================
     function smartInfoExtractTool() {
         if (document.getElementById('autoExtractPanel')) {
             document.getElementById('autoExtractPanel').remove();
@@ -4884,6 +5192,8 @@ function extractClassListTool() {
                             gradeTypeId: x.gradeTypeId,
                             gradeName: x.gradeName,
                             createSchoolClassId: x.createSchoolClassId,
+                            licenseId: x.licenseId,
+                            majorId: x.majorId,
                             classNames: (x.classNames || []).map(function(c) {
                                 return { id: c.id, name: c.name };
                             })
@@ -5037,6 +5347,56 @@ function extractClassListTool() {
             }
         }
 
+        // ============================================================
+        //  🆕 گرفتن دانش‌آموزان یک کلاس از API صحیح (Classification)
+        //  - از همون endpointی که خود سیدا استفاده می‌کنه
+        // ============================================================
+                async function fetchClassStudentsFromAPI(gradeTypeId, classNameId, createSchoolClassId, licenseId, majorId) {
+            var url = '/api/Classification/GetSchoolsByGrade' +
+                      '?gradeTypeId=' + gradeTypeId +
+                      '&classnameId=' + classNameId +
+                      '&createSchoolClassId=' + createSchoolClassId +
+                      '&licenceId=' + (licenseId || 0) +
+                      '&majorId=' + (majorId || 1);
+
+            var token = getToken();
+            if (!token) throw new Error('توکن پیدا نشد');
+
+            // ✅ اول GET، اگه 405 داد → POST
+            var response = await fetch(url, {
+                method: 'GET',
+                credentials: 'include',
+                headers: {
+                    'Accept': 'application/json, text/javascript, */*; q=0.01',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Authorization': 'Bearer ' + token,
+                    'client-id': getClientId()
+                }
+            });
+
+            // اگه GET کار نکرد، POST رو امتحان کن
+            if (response.status === 405) {
+                response = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json; charset=utf-8',
+                        'Accept': 'application/json, text/javascript, */*; q=0.01',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Authorization': 'Bearer ' + token,
+                        'client-id': getClientId()
+                    },
+                    body: JSON.stringify({})
+                });
+            }
+
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+
+            var json = await response.json();
+            var items = (json.data && json.data.data) || json.data || json || [];
+            return Array.isArray(items) ? items : [];
+        }
+
         // ساخت یک فایل Word واحد شامل همهٔ کلاس‌ها (هر کلاس در یک صفحه)
         function generateCombinedWordFile(blocks) {
             var htmlContent = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
@@ -5087,7 +5447,7 @@ function extractClassListTool() {
             setTimeout(function(){ URL.revokeObjectURL(link.href); }, 2000);
         }
 
-        // تابع اصلی: استخراج کلاسی با شماره تماس‌ها (نسخهٔ مقاوم)
+        // تابع اصلی: استخراج کلاسی با شماره تماس‌ها (نسخهٔ مقاوم - روش قدیم)
         async function extractByClasses() {
             // 1. ساختار پایه‌ها و کلاس‌ها از صفحه
             let grades = findGradesAndClasses();
@@ -5260,36 +5620,355 @@ function extractClassListTool() {
                   (separate ? '\n\n💡 اگر همهٔ فایل‌ها دانلود نشدند، در نوار آدرس مرورگر اجازهٔ «دانلود خودکار چند فایل» را بدهید.' : ''));
         }
 
-        // ==================== ساخت پنل ====================
+                // ============================================================
+        //  🆕 استخراج کلاسی - روش جدید (استفاده از Angular خود سیدا)
+        //  - از onChangeClassName استفاده می‌کنه (همون چیزی که سیدا خودش داره)
+        //  - برای هر پایه، مودال رو باز می‌کنه و کلاس‌ها رو تغییر می‌ده
+        // ============================================================
+        async function extractByClassesNew() {
+            // 1. ساختار پایه‌ها و کلاس‌ها از صفحه
+            let grades = findGradesAndClasses();
+            if (grades.length === 0) {
+                alert('❌ ساختار پایه‌ها پیدا نشد!\n\nمطمئن شو تو صفحه «کلاس‌های مدرسه» (#/SchoolClasses) هستی.');
+                return;
+            }
+
+            // 2. Map از کد ملی به مشخصات ذخیره‌شده
+            let studentsMap = {};
+            (allStudents || []).forEach(function(s) {
+                if (s.codemelli) studentsMap[String(s.codemelli).trim()] = s;
+            });
+
+            let totalClasses = 0;
+            grades.forEach(function(g) { totalClasses += g.classNames.length; });
+
+            if (totalClasses === 0) {
+                alert('❌ هیچ کلاسی پیدا نشد.');
+                return;
+            }
+
+            // 3. تایید از کاربر
+            let enrichmentNote = Object.keys(studentsMap).length > 0
+                ? '✅ شماره‌های تماس از دیتای ذخیره‌شده اضافه می‌شه\n'
+                : '⚠️ اگه اول «▶️ شروع» رو بزنی، شماره‌های تماس هم اضافه می‌شن\n';
+
+            if (!confirm('📊 (روش جدید) ' + totalClasses + ' کلاس در ' + grades.length + ' پایه\n\n' +
+                         'روش کار:\n' +
+                         '1. برای هر پایه، مودال تخصیص باز می‌شه\n' +
+                         '2. برای هر کلاس، اطلاعات از خود سیدا دریافت می‌شه\n' +
+                         '3. شماره تلفن‌ها از دیتای ذخیره‌شده اضافه می‌شن\n' +
+                         '4. برای هر کلاس، یه فایل Word جدا ساخته می‌شه\n\n' +
+                         enrichmentNote + '\n' +
+                         '⚠️ در طول عملیات، صفحه رو دست نزنید و کلیک نکنید\n\n' +
+                         'ادامه؟')) {
+                return;
+            }
+
+            isRunning = true;
+
+            let successClasses = 0;
+            let totalStudents = 0;
+            let emptyClasses = 0;
+            let errorClasses = 0;
+            let enrichedCount = 0;
+            let errorDetails = [];
+            let currentClassNum = 0;
+
+            // 4. برای هر پایه
+            for (let gi = 0; gi < grades.length; gi++) {
+                if (!isRunning) break;
+
+                let g = grades[gi];
+
+                updatePanelUI('⏳ پایه ' + g.gradeName + ' (' + (gi + 1) + '/' + grades.length + ')...');
+
+                // پیدا کردن ردیف این پایه
+                let gradeRow = null;
+                let allRows = document.querySelectorAll('table.table-bordered tbody tr');
+                for (let r = 0; r < allRows.length; r++) {
+                    let row = allRows[r];
+                    let btn = row.querySelector('button[ng-click*="addStudents"]');
+                    if (!btn) continue;
+                    try {
+                        let s = angular.element(row).scope();
+                        if (s && s.x && s.x.gradeTypeId === g.gradeTypeId) {
+                            gradeRow = row;
+                            break;
+                        }
+                    } catch (e) {}
+                }
+
+                if (!gradeRow) {
+                    errorDetails.push(g.gradeName + ': ردیف پایه پیدا نشد');
+                    continue;
+                }
+
+                // کلیک روی دکمه تخصیص
+                let assignBtn = gradeRow.querySelector('button[ng-click*="addStudents"]');
+                if (!assignBtn) {
+                    errorDetails.push(g.gradeName + ': دکمه تخصیص پیدا نشد');
+                    continue;
+                }
+
+                // اگه مودال قبلی بازه، ببندش
+                let existingModal = document.querySelector('[uib-modal-window]');
+                if (existingModal) {
+                    try {
+                        let allBtns = existingModal.querySelectorAll('button');
+                        for (let b of allBtns) {
+                            let txt = (b.textContent || '').trim();
+                            if (txt === 'بستن' || txt === 'انصراف') { b.click(); break; }
+                        }
+                    } catch (e) {}
+                    await sleep(1500);
+                }
+
+                assignBtn.click();
+
+                // انتظار برای باز شدن modal
+                let modal = null;
+                let scope = null;
+                for (let wait = 0; wait < 30; wait++) {
+                    await sleep(500);
+                    if (!isRunning) break;
+                    modal = document.querySelector('[uib-modal-window]');
+                    if (modal) {
+                        try {
+                            scope = angular.element(modal).scope();
+                            if (scope && scope.model && scope.comboOptionClassNames && scope.kendoStudents) {
+                                break;
+                            }
+                        } catch (e) {}
+                    }
+                }
+
+                if (!modal || !scope || !scope.comboOptionClassNames) {
+                    errorDetails.push(g.gradeName + ': مودال باز نشد');
+                    continue;
+                }
+
+                // انتظار کوتاه برای load اولیه
+                await sleep(2000);
+
+                // برای هر کلاس این پایه
+                let classes = scope.comboOptionClassNames.slice();
+
+                for (let ci = 0; ci < classes.length; ci++) {
+                    if (!isRunning) break;
+
+                    let cls = classes[ci];
+                    currentClassNum++;
+                    updatePanelUI('⏳ (' + currentClassNum + '/' + totalClasses + ') ' + cls.name + '...');
+
+                    try {
+                        // تغییر به این کلاس (با safe apply)
+                        if (scope.$$phase) {
+                            scope.model.classNameId = cls.id;
+                        } else {
+                            scope.$apply(function () {
+                                scope.model.classNameId = cls.id;
+                            });
+                        }
+
+                        // صدا زدن تابع سیدا
+                        scope.onChangeClassName();
+
+                        // انتظار برای دریافت داده
+                        await sleep(2500);
+
+                        if (!isRunning) break;
+
+                        // خواندن داده
+                        let data = scope.kendoStudents.dataSource.data();
+                        let rawStudents = data.map(function (item) {
+                            return item.toJSON ? item.toJSON() : item;
+                        });
+
+                        if (!rawStudents || rawStudents.length === 0) {
+                            emptyClasses++;
+                            continue;
+                        }
+
+                        // تبدیل به فرمت ما + غنی‌سازی
+                        let classStudents = rawStudents.map(function (item) {
+                            let nationalCode = String(item.studentId || item.nationalCode || '').trim();
+                            if (nationalCode && studentsMap[nationalCode]) {
+                                enrichedCount++;
+                                return studentsMap[nationalCode];
+                            }
+                            return {
+                                name: (item.firstName || '').trim(),
+                                family: (item.lastName || '').trim(),
+                                father: (item.fatherName || '').trim(),
+                                codemelli: nationalCode,
+                                birthDate: String(item.birthDate || '').trim(),
+                                fatherPhone: normalizePhone(item.fatherMobileNumber),
+                                motherPhone: normalizePhone(item.motherMobileNumber),
+                                shadPhone: normalizePhone(item.studentMobileNumber)
+                            };
+                        }).filter(function (s) { return s.codemelli; });
+
+                        if (classStudents.length > 0) {
+                            generateClassWordFile(cls.name, classStudents);
+                            successClasses++;
+                            totalStudents += classStudents.length;
+                            await sleep(1200);
+                        } else {
+                            emptyClasses++;
+                        }
+
+                    } catch (e) {
+                        console.error('خطا در کلاس ' + cls.name + ':', e);
+                        errorClasses++;
+                        errorDetails.push(cls.name + ': ' + e.message);
+                    }
+                }
+
+                // بستن مودال این پایه
+                try {
+                    let closeBtn = null;
+                    let allBtns = modal.querySelectorAll('button');
+                    for (let b of allBtns) {
+                        let txt = (b.textContent || '').trim();
+                        if (txt === 'بستن' || txt === 'انصراف') {
+                            closeBtn = b;
+                            break;
+                        }
+                    }
+                    if (!closeBtn) {
+                        closeBtn = modal.querySelector('button[ng-click*="closePopup"], button[ng-click*="cancel"]');
+                    }
+                    if (closeBtn) closeBtn.click();
+                } catch (e) {
+                    console.warn('خطا در بستن مودال:', e);
+                }
+
+                await sleep(2000);
+            }
+
+            isRunning = false;
+
+            // 5. گزارش نهایی
+            let msg = '✅ استخراج کلاسی (روش جدید) تمام شد!\n\n' +
+                      '📊 کلاس‌های موفق: ' + successClasses + '\n' +
+                      '👥 دانش‌آموزان: ' + totalStudents;
+            if (Object.keys(studentsMap).length > 0) {
+                msg += '\n📞 غنی‌شده با شماره: ' + enrichedCount;
+            }
+            if (emptyClasses > 0) msg += '\n⚪ کلاس‌های خالی: ' + emptyClasses;
+            if (errorClasses > 0) msg += '\n❌ کلاس‌های با خطا: ' + errorClasses;
+            if (errorDetails.length > 0) {
+                msg += '\n\nخطاها:\n' + errorDetails.slice(0, 5).join('\n');
+            }
+
+            updatePanelUI('✅ تمام! ' + successClasses + ' کلاس، ' + totalStudents + ' دانش‌آموز');
+            alert(msg);
+        }
+		        // ==================== راهنمای ابزار ====================
+        function showHelp() {
+            let existing = document.getElementById('sidaHelpOverlay');
+            if (existing) existing.remove();
+
+            let overlay = document.createElement('div');
+            overlay.id = 'sidaHelpOverlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.75);z-index:9999999;display:flex;align-items:center;justify-content:center;font-family:Tahoma,sans-serif;direction:rtl;padding:20px;box-sizing:border-box;';
+
+            overlay.innerHTML =
+                '<div style="background:white;color:#333;border-radius:12px;max-width:620px;width:100%;max-height:90vh;overflow-y:auto;padding:25px;box-shadow:0 10px 40px rgba(0,0,0,0.5);font-size:16px;line-height:2;position:relative;">' +
+                    '<button id="closeHelp" style="position:absolute;top:12px;left:12px;background:#ef4444;color:white;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:20px;font-weight:bold;">✕</button>' +
+
+                    '<h2 style="color:#8b5cf6;text-align:center;margin-bottom:20px;font-size:22px;border-bottom:3px solid #8b5cf6;padding-bottom:12px;">📖 راهنمای استفاده</h2>' +
+
+                    '<div style="background:#eff6ff;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #3b82f6;">' +
+                        '<h3 style="color:#1e40af;margin-bottom:10px;font-size:18px;">📥 استخراج مشخصات کامل</h3>' +
+                        '<p>اگه می‌خوای اسامی تمامی دانش‌آموزان همراه با مشخصات کامل (شماره تلفن پدر، مادر، شاد و ...) رو داشته باشی:</p>' +
+                        '<ol style="margin-right:20px;margin-top:10px;">' +
+                            '<li>برو به صفحهٔ «مشخصات فردی»</li>' +
+                            '<li>اول دکمهٔ «▶️ شروع» رو بزن</li>' +
+                            '<li>بعد دکمهٔ «📥 دانلود Word» رو بزن</li>' +
+                        '</ol>' +
+                    '</div>' +
+
+                    '<div style="background:#fef3c7;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #f59e0b;">' +
+                        '<h3 style="color:#92400e;margin-bottom:10px;font-size:18px;">🔍 فیلتر پایه</h3>' +
+                        '<p>می‌تونی فیلتر پایه رو فعال کنی تا اطلاعات هر پایه جداگانه دانلود بشه. کد خودکار فیلتر رو در نظر می‌گیره.</p>' +
+                    '</div>' +
+
+                    '<div style="background:#ecfdf5;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #10b981;">' +
+                        '<h3 style="color:#065f46;margin-bottom:10px;font-size:18px;">📋 لیست کلاسی همراه با مشخصات کامل — دو حالت</h3>' +
+                        '<div style="background:white;padding:12px;border-radius:6px;margin-bottom:10px;border:1px solid #a7f3d0;">' +
+                            '<strong style="color:#059669;font-size:16px;">✅ اگه تأیید نهایی کلاس‌بندی برای همهٔ دانش‌آموزان زده شده:</strong>' +
+                            '<ul style="margin-right:20px;margin-top:8px;">' +
+                                '<li>نیازی به زدن «▶️ شروع» نداری</li>' +
+                                '<li>فقط دکمهٔ «📋 لیست کلاسی» زیر بخش سبز رو بزن</li>' +
+                            '</ul>' +
+                        '</div>' +
+                        '<div style="background:white;padding:12px;border-radius:6px;border:1px solid #fed7aa;">' +
+                            '<strong style="color:#d97706;font-size:16px;">⚠️ اگه تأیید نهایی کلاس‌بندی انجام نشده:</strong>' +
+                            '<p style="margin-top:8px;">اول دکمهٔ «▶️ شروع» را بزن تا همهٔ دانش‌آموزان جمع‌آوری بشه، بعد:</p>' +
+                            '<ul style="margin-right:20px;margin-top:8px;">' +
+                                '<li>از دکمهٔ «📋 لیست کلاسی» زیر بخش نارنجی استفاده کن</li>' +
+                            '</ul>' +
+                        '</div>' +
+                    '</div>' +
+
+                    '<div style="background:#fef2f2;padding:14px;border-radius:8px;border-right:4px solid #ef4444;">' +
+                        '<h3 style="color:#991b1b;margin-bottom:10px;font-size:18px;">⚠️ نکات مهم</h3>' +
+                        '<ul style="margin-right:20px;">' +
+                            '<li>برای لیست کلاسی، صفحه باید در قسمت «کلاس‌بندی» باشه</li>' +
+                            '<li>برای استخراج مشخصات، صفحه باید «مشخصات فردی» باشه</li>' +
+                            '<li>در طول عملیات، صفحه رو دست نزن</li>' +
+                            '<li>برای توقف، دکمهٔ «⛔ توقف» رو بزن</li>' +
+                        '</ul>' +
+                    '</div>' +
+
+                    '<div style="text-align:center;margin-top:20px;padding-top:15px;border-top:2px dashed #ddd;color:#8b5cf6;font-weight:bold;font-size:18px;">' +
+                        '🎨 طراح: یوسف معصومی' +
+                    '</div>' +
+                '</div>';
+
+            document.body.appendChild(overlay);
+
+            document.getElementById('closeHelp').onclick = function() {
+                overlay.remove();
+            };
+            overlay.onclick = function(e) {
+                if (e.target === overlay) overlay.remove();
+            };
+        }
+		        // ==================== ساخت پنل ====================
         function createPanel() {
             let panel = document.createElement('div');
             panel.id = 'autoExtractPanel';
-            panel.style.cssText = 'position:fixed;top:20px;left:20px;background:white;border:2px solid #8b5cf6;border-radius:10px;padding:15px;width:320px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:Tahoma,sans-serif;direction:rtl;font-size:13px;color:#333;';
+            panel.style.cssText = 'position:fixed;top:20px;left:20px;background:white;border:2px solid #8b5cf6;border-radius:10px;padding:15px;width:340px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:Tahoma,sans-serif;direction:rtl;font-size:14px;color:#333;';
             panel.innerHTML =
-                '<div id="aeHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #8b5cf6;user-select:none;">' +
-                    '<strong style="color:#8b5cf6;font-size:15px;">📋 استخراج مشخصات (API)</strong>' +
-                    '<button id="btnClosePanel" style="background:none;border:none;cursor:pointer;font-size:18px;color:#999;">✕</button>' +
+                     '<div id="aeHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #8b5cf6;user-select:none;">' +
+                    '<strong style="color:#8b5cf6;font-size:16px;">📋 استخراج مشخصات (API)</strong>' +
+                    '<div style="display:flex;align-items:center;gap:6px;">' +
+                        '<button id="btnHelp" style="background:none;border:none;cursor:pointer;font-size:18px;color:#6b7280;padding:0;" title="راهنمای ابزار">📖</button>' +
+                        '<button id="btnClosePanel" style="background:none;border:none;cursor:pointer;font-size:18px;color:#999;padding:0;">✕</button>' +
+                    '</div>' +
                 '</div>' +
                 '<div style="background:#faf5ff;padding:12px;border-radius:8px;margin-bottom:12px;text-align:center;">' +
-                    '<div style="font-size:12px;color:#666;">تعداد دانش‌آموزان استخراج‌شده:</div>' +
+                    '<div style="font-size:14px;color:#666;">تعداد دانش‌آموزان استخراج‌شده:</div>' +
                     '<div id="aeTotal" style="font-size:28px;font-weight:bold;color:#2e7d32;">0</div>' +
-                    '<div id="aeStatus" style="font-size:11px;color:#666;margin-top:5px;">آماده شروع...</div>' +
+                    '<div id="aeStatus" style="font-size:14px;color:#666;margin-top:5px;">آماده شروع...</div>' +
                 '</div>' +
                 '<div style="display:flex;flex-direction:column;gap:8px;">' +
                     '<div style="display:flex;gap:8px;">' +
-                        '<button id="btnStart" style="flex:1;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">▶️ شروع</button>' +
-                        '<button id="btnStop" style="flex:1;background:#ef4444;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">⛔ توقف</button>' +
+                        '<button id="btnStart" style="flex:1;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">▶️ شروع</button>' +
+                        '<button id="btnStop" style="flex:1;background:#ef4444;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">⛔ توقف</button>' +
                     '</div>' +
-                    '<button id="btnDownload" style="background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">📥 دانلود Word</button>' +
-                    '<button id="btnClassExtract" style="background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">📊 استخراج کلاسی با شماره تماس‌ها</button>' +
-                    '<button id="btnClear" style="background:#fff;color:#c62828;border:1px solid #c62828;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;margin-top:5px;">🗑️ پاک‌سازی</button>' +
-                '</div>' +
-                '<div style="margin-top:10px;font-size:11px;color:#666;text-align:center;border-top:1px solid #eee;padding-top:8px;">' +
-                    '⚡ دریافت از API — سریع‌تر و دقیق‌تر' +
+                    '<button id="btnDownload" style="background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">📥 دانلود Word</button>' +
+                    '<div style="background:#ecfdf5;padding:10px;border-radius:6px;font-size:14px;color:#065f46;text-align:center;border:1px solid #a7f3d0;margin-top:4px;">✅ اگه تأیید نهایی کلاس‌بندی زدی:</div>' +
+                    '<button id="btnClassExtract" style="background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">📋 لیست کلاسی</button>' +
+                    '<div style="background:#fff7ed;padding:10px;border-radius:6px;font-size:14px;color:#9a3412;text-align:center;border:1px solid #fed7aa;margin-top:4px;">⚠️ اگه تأیید نهایی کلاس‌بندی نزدی:</div>' +
+                    '<button id="btnClassExtractNew" style="background:#f59e0b;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">📋 لیست کلاسی</button>' +
+                     '<button id="btnClear" style="background:#fff;color:#c62828;border:1px solid #c62828;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:14px;margin-top:5px;">🗑️ پاک‌سازی</button>' +
                 '</div>';
             document.body.appendChild(panel);
-           makeDraggable(panel, document.getElementById('aeHeader'));           // ← برای دسکتاپ (ماوس)
-           makeDraggableByTouch(panel, document.getElementById('aeHeader'));    // ← برای موبایل (لمس)
+          makeDraggable(panel, document.getElementById('aeHeader'));            // ← برای ماوس (دسکتاپ)
+          makeDraggableByTouch(panel, document.getElementById('aeHeader'));     // ← برای لمس (موبایل)
 
             document.getElementById('btnClosePanel').addEventListener('click', function() {
                 panel.remove();
@@ -5299,7 +5978,9 @@ function extractClassListTool() {
             document.getElementById('btnStop').addEventListener('click', stopExtraction);
             document.getElementById('btnDownload').addEventListener('click', downloadWord);
             document.getElementById('btnClassExtract').addEventListener('click', extractByClasses);
+            document.getElementById('btnClassExtractNew').addEventListener('click', extractByClassesNew);
             document.getElementById('btnClear').addEventListener('click', clearMemory);
+            document.getElementById('btnHelp').addEventListener('click', showHelp);
         }
 
         createPanel();
