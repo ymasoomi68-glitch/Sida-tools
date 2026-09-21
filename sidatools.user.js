@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛠️ جعبه ابزار هوشمند سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.5
+// @version      15.6
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -5134,6 +5134,7 @@ function extractClassListTool() {
 
     createPanel();
 }
+  
  // ==================== ابزار ۱۱: استخراج مشخصات (نسخه API) ====================
     function smartInfoExtractTool() {
         if (document.getElementById('autoExtractPanel')) {
@@ -5485,7 +5486,68 @@ function extractClassListTool() {
             document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(link.href);
             showNotification('فایل Word با موفقیت دانلود شد!');
         }
+		        // ==================== دانلود اکسل (فقط برای داده‌های «شروع») ====================
+        function downloadExcel() {
+            if (allStudents.length === 0) {
+                alert('هیچ داده‌ای برای دانلود وجود ندارد!\n\nلطفاً اول دکمهٔ «▶️ شروع» را بزنید.');
+                return;
+            }
 
+            // CSV با BOM برای Excel فارسی
+            var rows = [];
+            // هدر
+            rows.push([
+                'ردیف',
+                'نام',
+                'نام خانوادگی',
+                'نام پدر',
+                'کد ملی',
+                'تاریخ تولد',
+                'موبایل پدر',
+                'موبایل مادر',
+                'موبایل شاد'
+            ]);
+
+            // داده‌ها
+            allStudents.forEach(function(s, i) {
+                rows.push([
+                    (i + 1),
+                    s.name || '',
+                    s.family || '',
+                    s.father || '',
+                    s.codemelli || '',
+                    s.birthDate || '',
+                    s.fatherPhone || '',
+                    s.motherPhone || '',
+                    s.shadPhone || ''
+                ]);
+            });
+
+            // ساخت CSV
+            var csv = '\uFEFF';
+            rows.forEach(function(row) {
+                csv += row.map(function(v) {
+                    v = String(v == null ? '' : v);
+                    if (v.indexOf(',') > -1 || v.indexOf('"') > -1 || v.indexOf('\n') > -1) {
+                        return '"' + v.replace(/"/g, '""') + '"';
+                    }
+                    return v;
+                }).join(',') + '\r\n';
+            });
+
+            // دانلود
+            var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement('a');
+            link.href = url;
+            link.download = 'مشخصات_دانش_آموزان_' + new Date().toISOString().slice(0, 10) + '.csv';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+
+            showNotification('✅ فایل اکسل دانلود شد (' + allStudents.length + ' دانش‌آموز)');
+        }
         // ==================== توابع جدید: استخراج کلاسی ====================
 
         // پیدا کردن پایه‌ها و کلاس‌ها از صفحه SchoolClasses
@@ -6270,7 +6332,10 @@ function extractClassListTool() {
                         '<button id="btnStart" style="flex:1;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">▶️ شروع</button>' +
                         '<button id="btnStop" style="flex:1;background:#ef4444;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">⛔ توقف</button>' +
                     '</div>' +
-                    '<button id="btnDownload" style="background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">📥 دانلود Word</button>' +
+                     '<div style="display:flex;gap:8px;">' +
+                     '<button id="btnDownload" style="flex:1;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">📥 Word</button>' +
+                     '<button id="btnDownloadExcel" style="flex:1;background:#217346;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">📊 اکسل</button>' +
+                    '</div>' +
                     '<div style="background:#ecfdf5;padding:10px;border-radius:6px;font-size:14px;color:#065f46;text-align:center;border:1px solid #a7f3d0;margin-top:4px;">✅ اگه تأیید نهایی کلاس‌بندی زدی:</div>' +
                     '<button id="btnClassExtract" style="background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;">📋 لیست کلاسی</button>' +
                     '<div style="background:#fff7ed;padding:10px;border-radius:6px;font-size:14px;color:#9a3412;text-align:center;border:1px solid #fed7aa;margin-top:4px;">⚠️ اگه تأیید نهایی کلاس‌بندی نزدی:</div>' +
@@ -6287,6 +6352,7 @@ function extractClassListTool() {
             document.getElementById('btnStart').addEventListener('click', startExtraction);
             document.getElementById('btnStop').addEventListener('click', stopExtraction);
             document.getElementById('btnDownload').addEventListener('click', downloadWord);
+		    document.getElementById('btnDownloadExcel').addEventListener('click', downloadExcel);
             document.getElementById('btnClassExtract').addEventListener('click', extractByClasses);
             document.getElementById('btnClassExtractNew').addEventListener('click', extractByClassesNew);
             document.getElementById('btnClear').addEventListener('click', clearMemory);
@@ -6302,6 +6368,8 @@ function extractClassListTool() {
 
         showNotification('پنل آماده است. دکمه "شروع" را بزنید.');
     }
+    
+
     // ==================== ابزار ۱۲: تحلیل نمرات ====================
     function gradeAnalysisTool() {
         if (document.getElementById('gradeCollectorPanel')) {
