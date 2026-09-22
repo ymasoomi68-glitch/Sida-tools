@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📱 داشبورد موبایل ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.6
+// @version      15.7
 // @description  نسخه موبایل داشبورد15 ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -67,18 +67,59 @@
             .replace(/[\u0660-\u0669]/g, function(d) { return String(d.charCodeAt(0) - 0x0660); });
     }
 
-    // ==================== تابع خواندن کد مدرسه از سیدا ====================
+        // ==================== تابع خواندن کد مدرسه از سیدا ====================
     function getCurrentSchoolCode() {
-        const spans = document.querySelectorAll('span');
-        for (let span of spans) {
-            const text = span.textContent || '';
-            const trimmed = text.trim();
-            const normalized = toEnglishDigits(trimmed);
-            const match = normalized.match(/^(\d{8,10})/);
-            if (match && match[1]) {
-                return match[1];
+        // ✅ روش ۱ (بهترین): از Angular scope ($root.userContext.schoolId)
+        try {
+            var scope = angular.element(document.body).scope();
+            if (scope) {
+                var uc = null;
+                // اول $root.userContext
+                if (scope.$root && scope.$root.userContext && scope.$root.userContext.schoolId) {
+                    uc = scope.$root.userContext;
+                }
+                // بعد userContext
+                else if (scope.userContext && scope.userContext.schoolId) {
+                    uc = scope.userContext;
+                }
+                // یا از طریق $root
+                else if (scope.$root && scope.$root.userContext) {
+                    uc = scope.$root.userContext;
+                }
+
+                if (uc && uc.schoolId) {
+                    var sid = toEnglishDigits(String(uc.schoolId).trim());
+                    var m = sid.match(/(\d{8,10})/);
+                    if (m && m[1]) return m[1];
+                }
             }
-        }
+        } catch (e) {}
+
+        // ✅ روش ۲ (پشتیبان): از ng-bind="schoolId"
+        try {
+            var schoolIdEl = document.querySelector('[ng-bind*="schoolId"]');
+            if (schoolIdEl) {
+                var text = (schoolIdEl.textContent || '').trim();
+                var norm = toEnglishDigits(text);
+                var match = norm.match(/(\d{8,10})/);
+                if (match && match[1]) return match[1];
+            }
+        } catch (e) {}
+
+        // ✅ روش ۳ (پشتیبان دوم): از DOM — کد چسبیده به متن
+        try {
+            var spans = document.querySelectorAll('span');
+            for (var i = 0; i < spans.length; i++) {
+                var t = (spans[i].textContent || '').trim();
+                // اگه با عدد شروع بشه (مثل "96118256آتا...")
+                if (/^\d{8,10}/.test(toEnglishDigits(t))) {
+                    var n = toEnglishDigits(t);
+                    var mm = n.match(/^(\d{8,10})/);
+                    if (mm && mm[1]) return mm[1];
+                }
+            }
+        } catch (e) {}
+
         return null;
     }
 
