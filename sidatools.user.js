@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛠️ جعبه ابزار هوشمند سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.7.1
+// @version      15.7.2
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -232,16 +232,16 @@
         // رویداد کپی آیدی
         const copyBtn = document.getElementById('copy-id-btn');
         const copyMsg = document.getElementById('copy-message');
-        
+
         copyBtn.addEventListener('click', function() {
             const textToCopy = '@masoomi68';
-            
+
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(textToCopy).then(() => {
                     copyMsg.style.opacity = '1';
                     copyBtn.style.borderColor = '#10b981';
                     copyBtn.style.color = '#10b981';
-                    
+
                     setTimeout(() => {
                         copyMsg.style.opacity = '0';
                         copyBtn.style.borderColor = '#3ecfe0';
@@ -266,11 +266,11 @@
             textarea.setSelectionRange(0, 99999);
             document.execCommand('copy');
             document.body.removeChild(textarea);
-            
+
             copyMsg.style.opacity = '1';
             copyBtn.style.borderColor = '#10b981';
             copyBtn.style.color = '#10b981';
-            
+
             setTimeout(() => {
                 copyMsg.style.opacity = '0';
                 copyBtn.style.borderColor = '#3ecfe0';
@@ -293,17 +293,17 @@
             'gradePanel',
             'nationalityPanel'
         ];
-        
+
         panelIds.forEach(id => {
             const panel = document.getElementById(id);
             if (panel) {
                 panel.remove();
             }
         });
-        
+
         const overlays = document.querySelectorAll('#gradeReportOverlay, #nationalityReportOverlay, #reportContainer, #unauthorized-overlay');
         overlays.forEach(overlay => overlay.remove());
-        
+
         const notifications = document.querySelectorAll('#autoNotif, #uploadNotif, #natNotif, #collectNotif');
         notifications.forEach(notif => notif.remove());
     }
@@ -441,7 +441,7 @@
             toggleBtn.style.transform = 'scale(1.03)';
             toggleBtn.style.boxShadow = '0 6px 20px rgba(0,0,0,0.5)';
         });
-        
+
         toggleBtn.addEventListener('mouseleave', () => {
             toggleBtn.style.transform = 'scale(1)';
             toggleBtn.style.boxShadow = '0 4px 15px rgba(0,0,0,0.4)';
@@ -451,11 +451,11 @@
         function filterTools() {
             const searchTerm = searchInput.value.trim();
             const buttons = toolsContainer.querySelectorAll('button');
-            
+
             buttons.forEach(btn => {
                 const toolName = btn.textContent.trim();
                 const toolDesc = btn.title || '';
-                
+
                 if (!searchTerm) {
                     btn.style.display = '';
                     btn.style.transform = 'scale(1)';
@@ -673,7 +673,7 @@
         // ==================== مرتب‌سازی بر اساس ترتیب ذخیره‌شده ====================
         let tools = allTools;
         const savedOrderRaw = GM_getValue('sida_tools_order', null);
-        
+
         if (savedOrderRaw) {
             try {
                 const savedOrder = JSON.parse(savedOrderRaw);
@@ -698,14 +698,14 @@
             const btn = document.createElement('button');
             btn.title = tool.desc;
             btn.draggable = true;
-            
+
             // جدا کردن آیکون و متن
             const iconMatch = tool.name.match(/^(\S+)\s+(.+)$/);
             const icon = iconMatch ? iconMatch[1] : '';
             const label = iconMatch ? iconMatch[2] : tool.name;
-            
+
             btn.innerHTML = `<span class="tool-icon" style="display:inline-block; transition: transform 0.3s ease;">${icon}</span> <span>${label}</span>`;
-            
+
             btn.style.cssText = `
                 background: ${tool.color};
                 color: #ffffff;
@@ -722,30 +722,30 @@
                 flex-shrink: 0;
                 box-shadow: 0 2px 5px rgba(0,0,0,0.15);
             `;
-            
+
             btn.addEventListener('mouseenter', () => {
                 btn.style.transform = 'scale(1.05)';
                 btn.style.boxShadow = '0 6px 18px rgba(0,0,0,0.3)';
                 btn.style.filter = 'brightness(1.1)';
-                
+
                 // انیمیشن آیکون
                 const iconEl = btn.querySelector('.tool-icon');
                 if (iconEl) {
                     iconEl.style.transform = 'scale(1.3) rotate(10deg)';
                 }
             });
-            
+
             btn.addEventListener('mouseleave', () => {
                 btn.style.transform = 'scale(1)';
                 btn.style.boxShadow = '0 2px 5px rgba(0,0,0,0.15)';
                 btn.style.filter = 'brightness(1)';
-                
+
                 const iconEl = btn.querySelector('.tool-icon');
                 if (iconEl) {
                     iconEl.style.transform = 'scale(1) rotate(0deg)';
                 }
             });
-            
+
             btn.addEventListener('dragstart', (e) => {
                 btn.classList.add('dragging');
                 btn.style.cursor = 'grabbing';
@@ -756,12 +756,12 @@
                 btn.style.cursor = 'pointer';
                 btn.style.opacity = '1';
             });
-            
+
             btn.onclick = function() {
                 if (btn.classList.contains('dragging')) return;
                 tool.action();
             };
-            
+
             toolsContainer.appendChild(btn);
         });
 
@@ -772,12 +772,12 @@
         function openDrawer() {
             // بررسی کد مدرسه
             const access = checkSchoolAccess();
-            
+
             if (!access.allowed) {
                 showUnauthorizedError(access.current);
                 return;
             }
-            
+
             drawer.style.maxHeight = '70vh';
             drawer.style.opacity = '1';
             drawer.style.marginTop = '8px';
@@ -791,7 +791,7 @@
             drawer.style.marginTop = '0';
             drawer.style.overflowY = 'hidden';
             toggleBtn.textContent = '🛠️ ابزارها';
-            
+
             // پاک کردن جستجو
             if (searchInput) {
                 searchInput.value = '';
@@ -3203,10 +3203,10 @@ render();
             function addSpacersToPage() {
                 let tables = document.querySelectorAll('table');
                 if (tables.length === 0) return false;
-                
+
                 let grade = getGrade();
                 let betweenSpacing = getBetweenSpacing(grade);
-                
+
                 let comments = [];
                 let iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
                 let c;
@@ -3215,7 +3215,7 @@ render();
                         comments.push(c);
                     }
                 }
-                
+
                 comments.forEach(function(comment, index) {
                     if (index % 2 === 1) {
                         let topSpacer = document.createElement('div');
@@ -3236,25 +3236,25 @@ render();
                         comment.parentNode.insertBefore(spacer, comment.nextSibling);
                     }
                 });
-                
+
                 let firstTopSpacer = document.createElement('div');
                 firstTopSpacer.style.height = '5px';
                 firstTopSpacer.style.margin = '0';
                 firstTopSpacer.style.padding = '0';
                 firstTopSpacer.style.backgroundColor = 'transparent';
                 firstTopSpacer.style.display = 'block';
-                
+
                 let firstTable = tables[0];
                 if (firstTable) {
                     firstTable.parentNode.insertBefore(firstTopSpacer, firstTable);
                 }
-                
+
                 return betweenSpacing;
             }
 
             let allCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]')]
                 .filter(cb => !cb.closest('thead'));
-            
+
             if (!allCheckboxes.length) {
                 alert('چک‌باکسی پیدا نشد!');
                 return;
@@ -3276,17 +3276,17 @@ render();
                 el.innerText.includes('دفتر نتایج') ||
                 el.innerText.includes('خروجی')
             );
-            
+
             if (!btn) {
                 alert('دکمه "خروجی دفتر نتایج ارزشیابی" پیدا نشد!');
                 return;
             }
-            
+
             btn.click();
 
             setTimeout(function() {
                 let usedSpacing = addSpacersToPage();
-                
+
                 setTimeout(function() {
                     let printBtn = [...document.querySelectorAll('button,input')].find(el =>
                         el.innerText.includes('پرینت') || el.innerText.includes('چاپ')
@@ -3295,7 +3295,7 @@ render();
                         printBtn.style.outline = '3px solid #f5a623';
                         printBtn.style.outlineOffset = '2px';
                         printBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        
+
                         alert('✅ فاصله 5px بالای هر صفحه و ' + usedSpacing + 'px بین کارنامه‌ها (هوشمند) اضافه شد.\n\n🖨️ لطفاً حالا دکمه پرینت را به صورت دستی بزنید.');
                     } else {
                         alert('✅ فاصله‌ها اضافه شد، اما دکمه پرینت پیدا نشد. لطفاً خودتان پرینت بگیرید.');
@@ -4112,7 +4112,7 @@ function doSearch(){
                         <div style="background:#f0fdf4;padding:10px;border-radius:8px;margin-bottom:10px;">
                             <strong style="color:#10b981;">✅ تخصیص داده شده (${checkedCodes.length}):</strong>
                             <div style="margin-top:8px;font-size:12px;line-height:1.8;">
-                                ${targetStudents.filter(s => checkedCodes.includes(s.code)).map(s => 
+                                ${targetStudents.filter(s => checkedCodes.includes(s.code)).map(s =>
                                     `• ${s.name} ${s.family} (کد: ${s.code})`
                                 ).join('<br>') || 'هیچ دانش‌آموزی تخصیص داده نشده است.'}
                             </div>
@@ -4120,7 +4120,7 @@ function doSearch(){
                         <div style="background:#fef2f2;padding:10px;border-radius:8px;">
                             <strong style="color:#ef4444;">❌ تخصیص داده نشده (${targetStudents.length - checkedCodes.length}):</strong>
                             <div style="margin-top:8px;font-size:12px;line-height:1.8;">
-                                ${targetStudents.filter(s => !checkedCodes.includes(s.code)).map(s => 
+                                ${targetStudents.filter(s => !checkedCodes.includes(s.code)).map(s =>
                                     `• ${s.name} ${s.family} (کد: ${s.code})`
                                 ).join('<br>') || 'همه دانش‌آموزان تخصیص داده شده‌اند.'}
                             </div>
@@ -4174,11 +4174,11 @@ function doSearch(){
                     }
                 }
             }
-            
+
             document.getElementById('assignStatus').textContent = `✅ ${checked} دانش‌آموز تیک خوردند و اعمال شدند`;
-            
+
             showAssignmentReport(className, targetStudents, checkedCodes);
-            
+
             alert(`✅ ${checked} دانش‌آموز از کلاس ${className} تیک خوردند و اعمال شدند. اکنون میتوانید روی «تایید» کلیک کنید.`);
         }
 
@@ -4686,33 +4686,33 @@ function extractClassListTool() {
         html += ' &nbsp;&nbsp;&nbsp; <span class="label">نام آموزگار:</span>';
         html += '</div>';
 
-        // ===== جدول =====
+                // ===== جدول =====
         html += '<table>';
         html += '<colgroup>';
-       html += '<col style="width:5%;">';   // ردیف
-       html += '<col style="width:15%;">';  // کد
-       html += '<col style="width:30%;">';  // نام ← از ۴۰٪ به ۳۰٪
-       for (var c = 0; c < 10; c++) {
-       html += '<col style="width:5%;">'; // ← از ۴٪ به ۵٪
-   }
+        html += '<col style="width:5%;">';   // ردیف
+        html += '<col style="width:15%;">';  // کد
+        html += '<col style="width:30%;">';  // نام
+        for (var c = 0; c < 10; c++) {
+            html += '<col style="width:5%;">'; // ۱۰ ستون خالی
+        }
         html += '</colgroup>';
         html += '<thead><tr>';
-        html += '<th>ردیف</th>';
-        html += '<th>کد دانش‌آموزی</th>';
-        html += '<th>نام خانوادگی و نام</th>';
+        html += '<th style="width:5%;">ردیف</th>';
+        html += '<th style="width:15%;">کد دانش‌آموزی</th>';
+        html += '<th style="width:30%;">نام خانوادگی و نام</th>';
         for (var h = 0; h < 10; h++) {
-            html += '<th></th>';
+            html += '<th style="width:5%;"></th>';
         }
         html += '</tr></thead>';
         html += '<tbody>';
 
         students.forEach(function(s, index) {
             html += '<tr>';
-            html += '<td>' + (index + 1) + '</td>';
-            html += '<td class="code-cell">' + escapeHtml(s.code) + '</td>';
-            html += '<td class="name-cell">' + escapeHtml((s.family + ' ' + s.name).trim()) + '</td>';
+            html += '<td style="width:5%;">' + (index + 1) + '</td>';
+            html += '<td class="code-cell" style="width:15%;">' + escapeHtml(s.code) + '</td>';
+            html += '<td class="name-cell" style="width:30%;">' + escapeHtml((s.family + ' ' + s.name).trim()) + '</td>';
             for (var j = 0; j < 10; j++) {
-                html += '<td></td>';
+                html += '<td style="width:5%;"></td>';
             }
             html += '</tr>';
         });
@@ -4721,7 +4721,6 @@ function extractClassListTool() {
         html += '</body></html>';
         return html;
     }
-
     // ============================================================
     //  📥 دانلود Word
     // ============================================================
@@ -6654,7 +6653,7 @@ function extractClassListTool() {
 
         showNotification('پنل آماده است. دکمه "شروع" را بزنید.');
     }
-    
+
 
     // ==================== ابزار ۱۲: تحلیل نمرات ====================
     function gradeAnalysisTool() {
@@ -6752,7 +6751,7 @@ function extractClassListTool() {
             let mainTable = Array.from(tables).reduce((prev, current) => (prev.rows.length > current.rows.length) ? prev : current);
             let rows = mainTable.querySelectorAll('tbody tr');
             if (rows.length === 0) return '';
-            
+
             let identifiers = [];
             for (let i = 0; i < Math.min(rows.length, 5); i++) {
                 let cells = rows[i].querySelectorAll('td');
@@ -6769,27 +6768,27 @@ function extractClassListTool() {
                 alert('❌ هیچ جدولی در این صفحه پیدا نشد!');
                 return;
             }
-            
+
             let mainTable = Array.from(tables).reduce((prev, current) => (prev.rows.length > current.rows.length) ? prev : current);
             let rows = Array.from(mainTable.querySelectorAll('tr'));
             if (rows.length < 2) return;
-            
+
             let grade = getGradeInfo();
             let term = getTermInfo();
-            
+
             let pageHash = getPageHash();
             let storedData = getStoredData();
             if (!storedData.processedPages) storedData.processedPages = [];
-            
+
             if (pageHash && storedData.processedPages.includes(pageHash)) {
                 alert('⚠️ این صفحه قبلاً پردازش شده است. از افزودن مجدد جلوگیری شد.');
                 return;
             }
-            
+
             let headerCells = Array.from(rows[0].querySelectorAll('th, td'));
             let subjects = [];
             let excludeKeywords = ['ردیف', 'نام', 'خانوادگی', 'کد', 'دانش', 'ملی', 'شماره', 'تصویر', 'عکس', 'امضا', 'عملیات', 'تاریخ', 'پدر'];
-            
+
             headerCells.forEach((cell, index) => {
                 let text = getText(cell);
                 let isExcluded = excludeKeywords.some(keyword => text.includes(keyword));
@@ -6797,26 +6796,26 @@ function extractClassListTool() {
                     subjects.push({ name: text, index: index });
                 }
             });
-            
+
             if (subjects.length === 0) {
                 alert('❌ ستون درسی پیدا نشد!');
                 return;
             }
-            
+
             storedData.grade = grade;
             storedData.term = term;
             if (!storedData.subjects) storedData.subjects = {};
-            
+
             let failedStudentsInPage = 0;
             let totalStudentsInPage = 0;
             let newStudentsCount = 0;
-            
+
             for (let i = 1; i < rows.length; i++) {
                 let cells = rows[i].querySelectorAll('td, th');
                 let hasGrade = false;
                 let hasNoGrade = false;
                 let hasNBT = false;
-                
+
                 subjects.forEach(sub => {
                     if (cells[sub.index]) {
                         let gradeText = getText(cells[sub.index]);
@@ -6840,28 +6839,28 @@ function extractClassListTool() {
                         }
                     }
                 });
-                
+
                 if (hasGrade && !hasNoGrade) {
                     newStudentsCount++;
                     totalStudentsInPage++;
                     if (hasNBT) failedStudentsInPage++;
                 }
             }
-            
+
             if (pageHash) {
                 storedData.processedPages.push(pageHash);
                 if (storedData.processedPages.length > 50) {
                     storedData.processedPages = storedData.processedPages.slice(-50);
                 }
             }
-            
+
             let totalFailed = parseInt(localStorage.getItem('failed_students_count') || '0');
             let totalCount = parseInt(localStorage.getItem('total_students_count') || '0');
             totalFailed += failedStudentsInPage;
             totalCount += totalStudentsInPage;
             localStorage.setItem('failed_students_count', totalFailed.toString());
             localStorage.setItem('total_students_count', totalCount.toString());
-            
+
             saveStoredData(storedData);
             updatePanelUI(newStudentsCount);
             showNotification(newStudentsCount > 0 ? '✅ ' + newStudentsCount + ' دانش‌آموز جدید اضافه شد.' : '⚠️ دانش‌آموز جدیدی یافت نشد.');
@@ -6889,7 +6888,7 @@ function extractClassListTool() {
             try {
                 let gradeName = getGradeInfo();
                 let fileName = 'گزارش_نمرات_' + gradeName.replace(/ /g, '_');
-                
+
                 const canvas = await html2canvas(reportElement, {
                     scale: 5,
                     useCORS: true,
@@ -6905,26 +6904,26 @@ function extractClassListTool() {
                         if (clonedElement) {
                             const closeBtn = clonedElement.querySelector('#closeReportBtn');
                             if (closeBtn) closeBtn.remove();
-                            
+
                             const btnContainers = clonedElement.querySelectorAll('div');
                             btnContainers.forEach(div => {
                                 if (div.style.marginTop === '30px' && div.querySelector('#btnDownloadFinal')) {
                                     div.remove();
                                 }
                             });
-                            
+
                             const btnDownloadFinal = clonedElement.querySelector('#btnDownloadFinal');
                             if (btnDownloadFinal) btnDownloadFinal.remove();
-                            
+
                             const btnDownloadImage = clonedElement.querySelector('#btnDownloadImage');
                             if (btnDownloadImage) btnDownloadImage.remove();
-                            
+
                             const closeReportBtn2 = clonedElement.querySelector('#closeReportBtn2');
                             if (closeReportBtn2) closeReportBtn2.remove();
-                            
+
                             const allDivs = clonedElement.querySelectorAll('div[style*="margin-top:30px"]');
                             allDivs.forEach(div => div.remove());
-                            
+
                             ['btnDownloadFinal', 'btnDownloadImage', 'closeReportBtn2', 'closeReportBtn'].forEach(id => {
                                 const el = clonedElement.querySelector('#' + id);
                                 if (el) el.remove();
@@ -6941,14 +6940,14 @@ function extractClassListTool() {
                 document.body.removeChild(link);
 
                 showNotification('✅ عکس با کیفیت عالی دانلود شد.');
-                
+
             } catch (error) {
                 console.error('خطا در html2canvas:', error);
-                
+
                 try {
                     let gradeName = getGradeInfo();
                     let fileName = 'گزارش_نمرات_' + gradeName.replace(/ /g, '_');
-                    
+
                     const dataUrl = await htmlToImage.toPng(reportElement, {
                         quality: 1.0,
                         pixelRatio: 5,
@@ -6974,7 +6973,7 @@ function extractClassListTool() {
                     document.body.removeChild(link);
 
                     showNotification('✅ عکس با کیفیت عالی دانلود شد.');
-                    
+
                 } catch (fallbackError) {
                     console.error('خطا در html-to-image:', fallbackError);
                     alert('❌ خطا در دانلود عکس. لطفاً از دکمه دانلود Word استفاده کنید.');
@@ -6989,21 +6988,21 @@ function extractClassListTool() {
                 alert('هیچ داده‌ای جمع‌آوری نشده است.');
                 return;
             }
-            
+
             let totalStudents = 0;
             if (subjects.length > 0) {
                 totalStudents = storedData.subjects[subjects[0]]['مجموع'] || 0;
             }
-            
+
             let grade = storedData.grade || 'پایه نامشخص';
             let term = storedData.term || 'نوبت نامشخص';
             let failedCount = parseInt(localStorage.getItem('failed_students_count') || '0');
             let totalCount = parseInt(localStorage.getItem('total_students_count') || '0');
-            
+
             if (totalCount > 0) {
                 failedCount = Math.round((failedCount / totalCount) * totalStudents);
             }
-            
+
             let passedCount = totalStudents - failedCount;
             if (passedCount < 0) passedCount = 0;
             if (failedCount > totalStudents) failedCount = totalStudents;
@@ -7011,13 +7010,13 @@ function extractClassListTool() {
             let overlay = document.createElement('div');
             overlay.id = 'gradeReportOverlay';
             overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(245,247,250,0.98);z-index:999999;display:flex;flex-direction:column;align-items:center;font-family:Tahoma,sans-serif;direction:rtl;overflow-y:auto;padding:40px 20px;box-sizing:border-box;';
-            
+
             let html = '<div style="width:100%;max-width:900px;background:white;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.1);padding:30px;border:1px solid #e0e0e0;">';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:25px;border-bottom:2px solid #4472C4;padding-bottom:15px;"><h2 style="margin:0;color:#333;font-size:22px;">📊 گزارش نهایی نمرات</h2><button id="closeReportBtn" style="background:#f44336;color:white;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:20px;">✕</button></div>';
             html += '<p style="text-align:center;font-size:16px;color:#555;margin-bottom:10px;"><strong>' + escapeHtml(grade) + '</strong> — <strong>' + escapeHtml(term) + '</strong></p>';
             html += '<p style="text-align:center;font-size:16px;color:#555;margin-bottom:20px;">تعداد دانش‌آموزان: <strong style="color:#4472C4;font-size:20px;">' + totalStudents + '</strong> نفر</p>';
             html += '<div style="overflow-x:auto;"><table id="finalReportTable" style="width:100%;border-collapse:collapse;font-size:14px;text-align:center;"><thead><tr style="background:#4472C4;color:white;"><th style="padding:12px;border:1px solid #335a9e;">نام درس</th><th style="padding:12px;border:1px solid #335a9e;background:#2e7d32;">خ خ</th><th style="padding:12px;border:1px solid #335a9e;">درصد</th><th style="padding:12px;border:1px solid #335a9e;background:#4caf50;">خ</th><th style="padding:12px;border:1px solid #335a9e;">درصد</th><th style="padding:12px;border:1px solid #335a9e;background:#ff9800;">ق ق</th><th style="padding:12px;border:1px solid #335a9e;">درصد</th><th style="padding:12px;border:1px solid #335a9e;background:#f44336;color:white;">ن ب ت</th><th style="padding:12px;border:1px solid #335a9e;">درصد</th><th style="padding:12px;border:1px solid #335a9e;">مجموع</th></tr></thead><tbody>';
-            
+
             subjects.forEach(sub => {
                 let s = storedData.subjects[sub];
                 let total = s['مجموع'] || 0;
@@ -7025,7 +7024,7 @@ function extractClassListTool() {
                 let pKH = total > 0 ? ((s['خ'] || 0) / total * 100) : '-';
                 let pGH = total > 0 ? ((s['ق ق'] || 0) / total * 100) : '-';
                 let pNBT = total > 0 ? ((s['ن ب ت'] || 0) / total * 100) : '-';
-                
+
                 html += '<tr style="background:#fafafa;"><td style="padding:10px;border:1px solid #ddd;font-weight:bold;text-align:right;padding-right:15px;">' + escapeHtml(sub) + '</td>';
                 html += '<td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#2e7d32;">' + (s['خ خ'] > 0 ? s['خ خ'] : '-') + '</td>';
                 html += '<td style="padding:10px;border:1px solid #ddd;color:#2e7d32;">' + (s['خ خ'] > 0 ? formatPercent(pKHKH) : '-') + '</td>';
@@ -7037,34 +7036,34 @@ function extractClassListTool() {
                 html += '<td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#f44336;">' + (s['ن ب ت'] > 0 ? formatPercent(pNBT) : '-') + '</td>';
                 html += '<td style="padding:10px;border:1px solid #ddd;font-weight:bold;background:#e3f2fd;">' + total + '</td></tr>';
             });
-            
+
             html += '</tbody></table></div>';
-            
+
             let passPercent = totalStudents > 0 ? ((passedCount / totalStudents) * 100) : 0;
             let failPercent = totalStudents > 0 ? ((failedCount / totalStudents) * 100) : 0;
-            
+
             html += '<div style="margin-top:25px;border-top:2px solid #4472C4;padding-top:15px;"><h3 style="color:#4472C4;text-align:center;margin-bottom:15px;">📊 خلاصه آمار قبولی و مردودی</h3>';
             html += '<table style="width:100%;border-collapse:collapse;font-size:14px;text-align:center;margin:0 auto;"><thead><tr style="background:#4472C4;color:white;"><th style="padding:12px;border:1px solid #335a9e;">وضعیت</th><th style="padding:12px;border:1px solid #335a9e;">تعداد</th><th style="padding:12px;border:1px solid #335a9e;">درصد</th></tr></thead><tbody>';
             html += '<tr style="background:#e8f5e9;"><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#2e7d32;">✅ قبول</td><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#2e7d32;">' + passedCount + '</td><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#2e7d32;">' + formatPercent(passPercent) + '</td></tr>';
             html += '<tr style="background:#ffebee;"><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#c62828;">❌ مردود</td><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#c62828;">' + failedCount + '</td><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#c62828;">' + formatPercent(failPercent) + '</td></tr>';
             html += '<tr style="background:#e3f2fd;"><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#4472C4;">📊 مجموع</td><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#4472C4;">' + totalStudents + '</td><td style="padding:10px;border:1px solid #ddd;font-weight:bold;color:#4472C4;">100</td></tr></tbody></table></div>';
-            
+
             html += '<div style="margin-top:30px;display:flex;gap:15px;justify-content:center;flex-wrap:wrap;" class="no-print-buttons"><button id="btnDownloadFinal" style="background:#2e7d32;color:white;border:none;padding:12px 25px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">📥 دانلود فایل Word</button><button id="btnDownloadImage" style="background:#f59e0b;color:white;border:none;padding:12px 25px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">🖼️ دانلود عکس با کیفیت</button><button id="closeReportBtn2" style="background:#757575;color:white;border:none;padding:12px 25px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">بستن</button></div></div>';
-            
+
             overlay.innerHTML = html;
             document.body.appendChild(overlay);
-            
+
             document.getElementById('closeReportBtn').addEventListener('click', function() {
                 overlay.remove();
             });
             document.getElementById('closeReportBtn2').addEventListener('click', function() {
                 overlay.remove();
             });
-            
+
             document.getElementById('btnDownloadFinal').addEventListener('click', function() {
                 let tableElement = document.getElementById('finalReportTable');
                 let wordHtml = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>گزارش نمرات</title><style>body{font-family:Tahoma,Arial;font-size:12pt;direction:rtl;}h2{text-align:center;}h3{text-align:center;}table{border-collapse:collapse;width:100%;direction:rtl;margin-top:10px;}th{background:#4472C4;color:white;padding:10px;border:1px solid #999;}td{padding:8px;border:1px solid #999;text-align:center;}.passed{background:#e8f5e9;}.failed{background:#ffebee;}.total-row{background:#e3f2fd;}</style></head><body><h2>📊 گزارش آماری نمرات توصیفی</h2><p style="text-align:center;">' + escapeHtml(grade) + ' — ' + escapeHtml(term) + '</p><p style="text-align:center;">تعداد دانش‌آموزان: ' + totalStudents + ' نفر</p>' + tableElement.outerHTML + '<div style="margin-top:25px;border-top:2px solid #4472C4;padding-top:15px;"><h3 style="text-align:center;color:#4472C4;">📊 خلاصه آمار قبولی و مردودی</h3><table style="width:100%;border-collapse:collapse;font-size:12pt;text-align:center;margin:0 auto;"><thead><tr><th style="background:#4472C4;color:white;padding:10px;border:1px solid #999;">وضعیت</th><th style="background:#4472C4;color:white;padding:10px;border:1px solid #999;">تعداد</th><th style="background:#4472C4;color:white;padding:10px;border:1px solid #999;">درصد</th></tr></thead><tbody><tr class="passed"><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#2e7d32;">✅ قبول</td><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#2e7d32;">' + passedCount + '</td><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#2e7d32;">' + formatPercent(passPercent) + '</td></tr><tr class="failed"><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#c62828;">❌ مردود</td><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#c62828;">' + failedCount + '</td><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#c62828;">' + formatPercent(failPercent) + '</td></tr><tr class="total-row"><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#4472C4;">📊 مجموع</td><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#4472C4;">' + totalStudents + '</td><td style="padding:10px;border:1px solid #999;font-weight:bold;color:#4472C4;">100</td></tr></tbody></table></div></body></html>';
-                
+
                 let blob = new Blob(['\ufeff' + wordHtml], { type: 'application/msword' });
                 let link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
@@ -7142,15 +7141,15 @@ function extractClassListTool() {
             panel.innerHTML = '<div id="panelHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;user-select:none;"><strong style="color:#4472C4;font-size:15px;">📊 تحلیل نمرات</strong><button id="panelCloseBtn" style="background:none;border:none;cursor:pointer;font-size:18px;color:#999;">✕</button></div><div style="background:#f5f7fa;padding:12px;border-radius:8px;margin-bottom:15px;text-align:center;"><div style="font-size:12px;color:#666;">کل دانش‌آموزان پردازش‌شده:</div><div id="totalProcessed" style="font-size:28px;font-weight:bold;color:#2e7d32;">0</div><div id="panelMsg" style="font-size:11px;color:#666;margin-top:5px;">آماده افزودن صفحات بعدی...</div></div><div style="display:flex;flex-direction:column;gap:10px;"><button id="btnAddPage" style="background:#4472C4;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">➕ افزودن این صفحه به گزارش</button><button id="btnViewReport" style="background:#2e7d32;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">📥 مشاهده و دانلود گزارش نهایی</button><button id="btnClear" style="background:#fff;color:#c62828;border:1px solid #c62828;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;margin-top:5px;">🗑️ پاک‌سازی تمام داده‌های جمع‌آوری‌شده</button></div>';
             document.body.appendChild(panel);
             makeDraggable(panel, document.getElementById('panelHeader'));
-            
+
             document.getElementById('panelCloseBtn').addEventListener('click', function() {
                 panel.remove();
             });
-            
+
             document.getElementById('btnAddPage').addEventListener('click', analyzeAndAccumulate);
             document.getElementById('btnViewReport').addEventListener('click', showReportAndDownload);
             document.getElementById('btnClear').addEventListener('click', clearAllData);
-            
+
             updatePanelUI();
             showNotification('پنل آماده است. نوار آبی بالا را بگیرید و جابه‌جا کنید.');
         }
@@ -7235,87 +7234,87 @@ function extractClassListTool() {
         };
 
         function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-        
+
         function normalizeText(text) {
             return text.replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/ة/g, 'ه').replace(/\s+/g, ' ').trim();
         }
-        
+
         function getText(el) {
             return (el.textContent || '').trim();
         }
-        
+
         function detectLessonName() {
             const foundTexts = [];
-            
+
             document.querySelectorAll('legend').forEach(el => {
                 const text = getText(el);
                 if (text && text.length > 5) foundTexts.push({ source: 'legend', text });
             });
-            
+
             document.querySelectorAll('span[data-value], span.nimeh2, span.ng-binding').forEach(el => {
                 const text = getText(el);
                 if (text && text.length > 2) foundTexts.push({ source: 'span', text });
             });
-            
+
             const knownLessons = ['فارسی', 'قرآن', 'ریاضی', 'علوم تجربی', 'هنر', 'تربیت بدنی', 'هدیه های آسمان', 'مطالعات اجتماعی', 'شایستگی های عمومی', 'تفکر و پژوهش', 'کار و فناوری'];
             const normalizedLessons = knownLessons.map(l => ({ original: l, normalized: normalizeText(l) }));
-            
+
             for (let item of foundTexts) {
                 if (item.source === 'legend') {
                     const codeMatch = item.text.match(/\d+\s*-\s*([^\s\/]+)/);
                     if (codeMatch) {
                         const name = normalizeText(codeMatch[1]);
-                        for (let l of normalizedLessons) { 
-                            if (name === l.normalized || l.normalized.includes(name)) return l.original; 
+                        for (let l of normalizedLessons) {
+                            if (name === l.normalized || l.normalized.includes(name)) return l.original;
                         }
                     }
-                    
+
                     const norm = normalizeText(item.text);
-                    for (let l of normalizedLessons) { 
-                        if (norm.includes(l.normalized)) return l.original; 
+                    for (let l of normalizedLessons) {
+                        if (norm.includes(l.normalized)) return l.original;
                     }
                 }
             }
-            
+
             for (let item of foundTexts) {
                 if (item.source === 'span') {
                     const norm = normalizeText(item.text);
-                    for (let l of normalizedLessons) { 
-                        if (norm === l.normalized || norm.includes(l.normalized)) return l.original; 
+                    for (let l of normalizedLessons) {
+                        if (norm === l.normalized || norm.includes(l.normalized)) return l.original;
                     }
                 }
             }
-            
+
             const bodyText = normalizeText(document.body.textContent);
             for (let l of normalizedLessons) {
                 if (bodyText.includes(l.normalized)) return l.original;
             }
-            
+
             return null;
         }
-        
+
         function findMainTable() {
             const tables = [];
-            
+
             document.querySelectorAll('.k-grid-content table').forEach(t => {
                 if (t.querySelector('tbody tr')) tables.push(t);
             });
-            
+
             document.querySelectorAll('[class*="score"] table').forEach(t => {
                 if (t.querySelector('tbody tr') && !tables.includes(t)) tables.push(t);
             });
-            
+
             document.querySelectorAll('table th[data-field]').forEach(th => {
                 const t = th.closest('table');
                 if (t && t.querySelector('tbody tr') && !tables.includes(t)) tables.push(t);
             });
-            
+
             if (tables.length === 0) {
                 document.querySelectorAll('table').forEach(t => {
                     if (t.querySelector('tbody tr')) tables.push(t);
                 });
             }
-            
+
             if (tables.length > 1) {
                 tables.sort((a, b) => {
                     const aRows = a.querySelectorAll('tbody tr').length;
@@ -7323,29 +7322,29 @@ function extractClassListTool() {
                     return bRows - aRows;
                 });
             }
-            
+
             return tables[0] || null;
         }
-        
+
         function countStudents(table) {
             const rows = table.querySelectorAll('tbody tr');
             let count = 0;
-            for (let row of rows) { 
-                if (row.querySelectorAll('td').length >= 3) count++; 
+            for (let row of rows) {
+                if (row.querySelectorAll('td').length >= 3) count++;
             }
             return count;
         }
-        
+
         function detectColumns(table) {
             const rows = table.querySelectorAll('tbody tr');
             if (rows.length === 0) return null;
-            
+
             const firstRow = rows[0];
             const cells = firstRow.querySelectorAll('td');
             if (cells.length < 4) return null;
-            
+
             const cols = { gradeCol: -1, descCol: -1, totalCols: cells.length };
-            
+
             for (let i = 0; i < cells.length; i++) {
                 const input = cells[i].querySelector('input[type="text"], input[type="number"], input:not([type="checkbox"])');
                 if (input) {
@@ -7353,11 +7352,11 @@ function extractClassListTool() {
                     break;
                 }
             }
-            
+
             if (cols.gradeCol === -1) {
                 cols.gradeCol = 0;
             }
-            
+
             for (let i = cells.length - 1; i > cols.gradeCol; i--) {
                 const input = cells[i].querySelector('input, textarea');
                 if (input) {
@@ -7365,14 +7364,14 @@ function extractClassListTool() {
                     break;
                 }
             }
-            
+
             if (cols.descCol === -1 || cols.descCol === cols.gradeCol) {
                 cols.descCol = cells.length - 1;
             }
-            
+
             return cols;
         }
-        
+
         async function waitForTable(timeout = 10000) {
             const start = Date.now();
             while (Date.now() - start < timeout) {
@@ -7382,57 +7381,57 @@ function extractClassListTool() {
             }
             return null;
         }
-        
+
         function setInputValue(input, value) {
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
             nativeInputValueSetter.call(input, value);
-            
+
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
             input.dispatchEvent(new Event('blur', { bubbles: true }));
         }
-        
+
         async function processGrades(gradeLevel) {
             const table = await waitForTable();
-            if (!table) { 
-                alert('❌ جدول نمرات پیدا نشد!\n\nمطمئن شوید در صفحه ثبت نمرات توصیفی هستید.'); 
-                return; 
+            if (!table) {
+                alert('❌ جدول نمرات پیدا نشد!\n\nمطمئن شوید در صفحه ثبت نمرات توصیفی هستید.');
+                return;
             }
-            
+
             const lessonName = detectLessonName();
-            if (!lessonName) { 
-                alert('⚠️ اسم درس تشخیص داده نشد!\n\nلطفاً با پشتیبان تماس بگیرید.'); 
-                return; 
+            if (!lessonName) {
+                alert('⚠️ اسم درس تشخیص داده نشد!\n\nلطفاً با پشتیبان تماس بگیرید.');
+                return;
             }
-            
+
             if (!DESCRIPTIONS[gradeLevel] || !DESCRIPTIONS[gradeLevel][lessonName]) {
-                alert(`⚠️ متن توصیفی برای درس "${lessonName}" در ${gradeLevel} تعریف نشده است!`); 
-                return; 
+                alert(`⚠️ متن توصیفی برای درس "${lessonName}" در ${gradeLevel} تعریف نشده است!`);
+                return;
             }
-            
+
             const cols = detectColumns(table);
-            if (!cols) { 
-                alert('❌ ساختار جدول تشخیص داده نشد!'); 
-                return; 
+            if (!cols) {
+                alert('❌ ساختار جدول تشخیص داده نشد!');
+                return;
             }
-            
+
             const panel = document.getElementById('gradePanel');
             if (panel) panel.style.display = 'none';
-            
+
             const totalStudents = countStudents(table);
             let successCount = 0, emptyCount = 0, errorCount = 0;
             const rows = table.querySelectorAll('tbody tr');
-            
+
             for (let row of rows) {
                 const cells = row.querySelectorAll('td');
                 if (cells.length < 3) continue;
-                
+
                 const gradeCell = cells[cols.gradeCol];
                 if (!gradeCell) continue;
-                
+
                 let grade = null;
                 const input = gradeCell.querySelector('input[type="text"], input[type="number"], input:not([type="checkbox"])');
-                
+
                 if (input) {
                     const val = input.value.trim();
                     if (val !== '') grade = parseInt(val);
@@ -7440,51 +7439,51 @@ function extractClassListTool() {
                     const text = getText(gradeCell);
                     if (text !== '') grade = parseInt(text);
                 }
-                
-                if (grade === null || isNaN(grade)) { 
-                    emptyCount++; 
-                    continue; 
+
+                if (grade === null || isNaN(grade)) {
+                    emptyCount++;
+                    continue;
                 }
-                
-                if (grade < 1 || grade > 4) { 
-                    errorCount++; 
-                    continue; 
+
+                if (grade < 1 || grade > 4) {
+                    errorCount++;
+                    continue;
                 }
-                
+
                 for (let i = cols.gradeCol + 1; i < cols.descCol; i++) {
                     if (i < cells.length) {
                         const ci = cells[i].querySelector('input');
-                        if (ci) { 
+                        if (ci) {
                             setInputValue(ci, grade.toString());
                         }
                     }
                 }
-                
+
                 if (cols.descCol < cells.length) {
                     const di = cells[cols.descCol].querySelector('input, textarea');
-                    if (di) { 
+                    if (di) {
                         setInputValue(di, DESCRIPTIONS[gradeLevel][lessonName][grade]);
                     }
                 }
-                
+
                 successCount++;
                 await sleep(50);
             }
-            
+
             let msg = `✅ نمرات با موفقیت ثبت شد!\n\n`;
             msg += `🎒 پایه: ${gradeLevel}\n📚 درس: ${lessonName}\n`;
             msg += `👨‍🎓 تعداد کل: ${totalStudents} نفر\n✅ ثبت شده: ${successCount} مورد\n`;
             if (emptyCount > 0) msg += `⚠️ نمرات خالی: ${emptyCount} مورد\n`;
             if (errorCount > 0) msg += `❌ نمرات نامعتبر: ${errorCount} مورد\n`;
             alert(msg);
-            
+
             if (panel) panel.style.display = 'block';
         }
-        
+
         function createPanel() {
             let old = document.getElementById('gradePanel');
             if (old) old.remove();
-            
+
             const grades = [
                 { name: 'اول', emoji: '🎒', color: '#e91e63' },
                 { name: 'دوم', emoji: '📏', color: '#9c27b0' },
@@ -7493,35 +7492,35 @@ function extractClassListTool() {
                 { name: 'پنجم', emoji: '🏆', color: '#ff5722' },
                 { name: 'ششم', emoji: '⭐', color: '#FFD700' }
             ];
-            
+
             const panel = document.createElement('div');
             panel.id = 'gradePanel';
             panel.style.cssText = `position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #0f4c81;border-radius:12px;padding:8px 12px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.25);font-family:Tahoma,sans-serif;direction:rtl;`;
-            
+
             let btns = '';
             grades.forEach(g => {
                 btns += `<button class="grade-btn" data-grade="${g.name}" style="padding:8px 14px;margin:0 3px;border:2px solid ${g.color};border-radius:8px;background:white;color:${g.color};cursor:pointer;font-family:inherit;font-size:13px;font-weight:bold;transition:all 0.2s;white-space:nowrap;">${g.emoji} ${g.name}</button>`;
             });
-            
+
             panel.innerHTML = `<div id="gradePanelHeader" style="text-align:center;margin-bottom:6px;cursor:move;user-select:none;font-size:12px;font-weight:bold;color:#0f4c81;">📚 انتخاب پایه</div><div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap;justify-content:center;">${btns}<button id="btnCancel" style="padding:8px 10px;margin:0 3px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;color:#888;cursor:pointer;font-family:inherit;font-size:12px;white-space:nowrap;">✕</button></div>`;
-            
+
             document.body.appendChild(panel);
-            
+
             const header = document.getElementById('gradePanelHeader');
             let pos1=0,pos2=0,pos3=0,pos4=0;
             header.onmousedown = function(e) {
                 e.preventDefault();
-                pos3 = e.clientX; 
+                pos3 = e.clientX;
                 pos4 = e.clientY;
-                document.onmouseup = () => { 
-                    document.onmouseup = null; 
-                    document.onmousemove = null; 
+                document.onmouseup = () => {
+                    document.onmouseup = null;
+                    document.onmousemove = null;
                 };
                 document.onmousemove = function(e) {
                     e.preventDefault();
-                    pos1 = pos3 - e.clientX; 
+                    pos1 = pos3 - e.clientX;
                     pos2 = pos4 - e.clientY;
-                    pos3 = e.clientX; 
+                    pos3 = e.clientX;
                     pos4 = e.clientY;
                     panel.style.top = (panel.offsetTop - pos2) + "px";
                     panel.style.left = (panel.offsetLeft - pos1) + "px";
@@ -7529,12 +7528,12 @@ function extractClassListTool() {
                     panel.style.transform = 'none';
                 };
             };
-            
+
             panel.querySelectorAll('.grade-btn').forEach(btn => {
-                btn.addEventListener('click', function() { 
-                    processGrades(this.getAttribute('data-grade')); 
+                btn.addEventListener('click', function() {
+                    processGrades(this.getAttribute('data-grade'));
                 });
-                
+
                 btn.addEventListener('mouseover', function() {
                     this.style.background = this.style.borderColor;
                     this.style.color = 'white';
@@ -7544,14 +7543,14 @@ function extractClassListTool() {
                     this.style.color = this.style.borderColor;
                 });
             });
-            
-            document.getElementById('btnCancel').addEventListener('click', () => { 
-                panel.remove(); 
+
+            document.getElementById('btnCancel').addEventListener('click', () => {
+                panel.remove();
             });
-            
+
             panel.addEventListener('click', e => e.stopPropagation());
         }
-        
+
         createPanel();
     }
 // ==================== ابزار ۱۴: بررسی ملیت والدین (نسخه API) ====================
