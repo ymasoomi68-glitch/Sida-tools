@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📱 داشبورد موبایل ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.7.1
+// @version      15.7.2
 // @description  نسخه موبایل داشبورد15 ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -4372,33 +4372,33 @@ function extractClassListTool() {
         html += ' &nbsp;&nbsp;&nbsp; <span class="label">نام آموزگار:</span>';
         html += '</div>';
 
-        // ===== جدول =====
+                // ===== جدول =====
         html += '<table>';
         html += '<colgroup>';
-       html += '<col style="width:5%;">';   // ردیف
-       html += '<col style="width:15%;">';  // کد
-       html += '<col style="width:30%;">';  // نام ← از ۴۰٪ به ۳۰٪
-       for (var c = 0; c < 10; c++) {
-       html += '<col style="width:5%;">'; // ← از ۴٪ به ۵٪
-   }
+        html += '<col style="width:5%;">';   // ردیف
+        html += '<col style="width:15%;">';  // کد
+        html += '<col style="width:30%;">';  // نام
+        for (var c = 0; c < 10; c++) {
+            html += '<col style="width:5%;">'; // ۱۰ ستون خالی
+        }
         html += '</colgroup>';
         html += '<thead><tr>';
-        html += '<th>ردیف</th>';
-        html += '<th>کد دانش‌آموزی</th>';
-        html += '<th>نام خانوادگی و نام</th>';
+        html += '<th style="width:5%;">ردیف</th>';
+        html += '<th style="width:15%;">کد دانش‌آموزی</th>';
+        html += '<th style="width:30%;">نام خانوادگی و نام</th>';
         for (var h = 0; h < 10; h++) {
-            html += '<th></th>';
+            html += '<th style="width:5%;"></th>';
         }
         html += '</tr></thead>';
         html += '<tbody>';
 
         students.forEach(function(s, index) {
             html += '<tr>';
-            html += '<td>' + (index + 1) + '</td>';
-            html += '<td class="code-cell">' + escapeHtml(s.code) + '</td>';
-            html += '<td class="name-cell">' + escapeHtml((s.family + ' ' + s.name).trim()) + '</td>';
+            html += '<td style="width:5%;">' + (index + 1) + '</td>';
+            html += '<td class="code-cell" style="width:15%;">' + escapeHtml(s.code) + '</td>';
+            html += '<td class="name-cell" style="width:30%;">' + escapeHtml((s.family + ' ' + s.name).trim()) + '</td>';
             for (var j = 0; j < 10; j++) {
-                html += '<td></td>';
+                html += '<td style="width:5%;"></td>';
             }
             html += '</tr>';
         });
@@ -4407,7 +4407,6 @@ function extractClassListTool() {
         html += '</body></html>';
         return html;
     }
-
     // ============================================================
     //  📥 دانلود Word
     // ============================================================
