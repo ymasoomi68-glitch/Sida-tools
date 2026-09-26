@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛠️ جعبه ابزار هوشمند سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.7
+// @version      15.7.1
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -18,7 +18,7 @@
     'use strict';
 
             // ==================== کد امنیتی (هش شده) ====================
-     // هش کدهای مجاز مدرسه
+      // هش کدهای مجاز مدرسه
     const MY_SCHOOL_HASHES = [
 		'7cff9bfca74bc7fc',  // کد مدرسه 40983383
 		'f7d1289ab1c62624',  // کد مدرسه 96011817
@@ -4487,7 +4487,8 @@ function doSearch(){
 
         createPanel();
     }
-   // ==================== ابزار ۱۰: استخراج لیست کلاسی (نسخه API) ====================
+
+// ==================== ابزار ۱۰: استخراج لیست کلاسی (نسخه API) ====================
 function extractClassListTool() {
     if (document.getElementById('extractPanel')) {
         document.getElementById('extractPanel').remove();
@@ -4522,7 +4523,6 @@ function extractClassListTool() {
     function findGradesAndClasses() {
         let grades = [];
 
-        // از صفحه اصلی
         let rows = document.querySelectorAll('table.table-bordered tbody tr');
         rows.forEach(function(row) {
             let btn = row.querySelector('button[ng-click*="addStudents"]');
@@ -4545,7 +4545,6 @@ function extractClassListTool() {
 
         if (grades.length > 0) return grades;
 
-        // fallback: از مودال
         let modal = document.querySelector('[uib-modal-window], .modal.show, .modal[style*="display: block"]');
         if (modal) {
             try {
@@ -4621,38 +4620,120 @@ function extractClassListTool() {
         }
     }
 
-    // ===== ساخت فایل Word =====
+    // ============================================================
+    //  🎨 فونت و ابعاد تطبیقی بر اساس تعداد دانش‌آموز
+    //  هرچه کمتر → بزرگ‌تر
+    // ============================================================
+    function getAdaptiveStyle(count) {
+        var fontSize, paddingV, headerFont, codeFont;
+        if (count <= 10)      { fontSize = 16; paddingV = 10;  headerFont = 18; codeFont = 16; }
+        else if (count <= 15) { fontSize = 14; paddingV = 8;   headerFont = 17; codeFont = 14; }
+        else if (count <= 20) { fontSize = 13; paddingV = 6;   headerFont = 16; codeFont = 13; }
+        else if (count <= 25) { fontSize = 12; paddingV = 5;   headerFont = 15; codeFont = 12; }
+        else if (count <= 30) { fontSize = 11; paddingV = 4;   headerFont = 15; codeFont = 11; }
+        else if (count <= 38) { fontSize = 10; paddingV = 3;   headerFont = 14; codeFont = 10; }
+        else if (count <= 46) { fontSize = 9;  paddingV = 2.5; headerFont = 13; codeFont = 9; }
+        else if (count <= 55) { fontSize = 8;  paddingV = 2;   headerFont = 13; codeFont = 8; }
+        else if (count <= 65) { fontSize = 7;  paddingV = 1.5; headerFont = 12; codeFont = 7; }
+        else                  { fontSize = 6;  paddingV = 1;   headerFont = 12; codeFont = 6; }
+        return {
+            fontSize: fontSize,
+            paddingV: paddingV,
+            headerFont: headerFont,
+            codeFont: codeFont,
+            headerPaddingV: Math.max(2, paddingV - 1)
+        };
+    }
+
+    // ============================================================
+    //  📄 ساخت HTML چاپ/دانلود (مشترک)
+    // ============================================================
+    function buildPrintHTML(className, students, forWord) {
+        if (!students || students.length === 0) {
+            return '';
+        }
+
+        var count = students.length;
+        var st = getAdaptiveStyle(count);
+
+        var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
+        html += '<head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">';
+        html += '<title>لیست دانش‌آموزان</title>';
+        html += '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->';
+        html += '<style>';
+        // حاشیهٔ بیشتر از بالا/چپ/راست، کم از پایین
+        html += '@page { size: A4 portrait; margin: 0.8cm 1cm 0.3cm 1cm; mso-page-orientation: portrait; }';
+        html += 'html, body { margin: 0; padding: 0; }';
+        html += 'body { font-family: "B Nazanin", "Tahoma", sans-serif; direction: rtl; }';
+        html += '.header-line { text-align: center; font-size: ' + st.headerFont + 'pt; font-weight: bold; ';
+        html += 'margin: 0 0 6px 0; padding: 3px 0 6px 0; border-bottom: 1.5px solid #000; ';
+        html += 'white-space: nowrap; overflow: hidden; }';
+        html += '.header-line .label { font-weight: normal; }';
+        html += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: ' + st.fontSize + 'pt; }';
+        html += 'th { background-color: #e8e8e8; font-weight: bold; border: 1px solid #000; ';
+        html += 'padding: ' + st.headerPaddingV + 'px 3px; text-align: center; font-size: ' + (st.fontSize + 0.5) + 'pt; }';
+        html += 'td { border: 1px solid #000; padding: ' + st.paddingV + 'px 3px; text-align: center; font-size: ' + st.fontSize + 'pt; }';
+        html += 'td.name-cell { text-align: center; padding: 0 4px; font-size: ' + (st.fontSize + 2) + 'pt; }';
+        html += 'td.code-cell { font-size: ' + st.codeFont + 'pt; }';
+        html += 'tr { page-break-inside: avoid; }';
+        html += 'table { page-break-inside: avoid; }';
+        html += '</style></head><body>';
+
+        // ===== هدر تک‌خطی =====
+        html += '<div class="header-line">';
+        html += 'لیست دانش آموزان کلاس ' + escapeHtml(className);
+        html += ' &nbsp;&nbsp;&nbsp; تعداد : ' + count;
+        html += ' &nbsp;&nbsp;&nbsp; <span class="label">نام آموزگار:</span>';
+        html += '</div>';
+
+        // ===== جدول =====
+        html += '<table>';
+        html += '<colgroup>';
+       html += '<col style="width:5%;">';   // ردیف
+       html += '<col style="width:15%;">';  // کد
+       html += '<col style="width:30%;">';  // نام ← از ۴۰٪ به ۳۰٪
+       for (var c = 0; c < 10; c++) {
+       html += '<col style="width:5%;">'; // ← از ۴٪ به ۵٪
+   }
+        html += '</colgroup>';
+        html += '<thead><tr>';
+        html += '<th>ردیف</th>';
+        html += '<th>کد دانش‌آموزی</th>';
+        html += '<th>نام خانوادگی و نام</th>';
+        for (var h = 0; h < 10; h++) {
+            html += '<th></th>';
+        }
+        html += '</tr></thead>';
+        html += '<tbody>';
+
+        students.forEach(function(s, index) {
+            html += '<tr>';
+            html += '<td>' + (index + 1) + '</td>';
+            html += '<td class="code-cell">' + escapeHtml(s.code) + '</td>';
+            html += '<td class="name-cell">' + escapeHtml((s.family + ' ' + s.name).trim()) + '</td>';
+            for (var j = 0; j < 10; j++) {
+                html += '<td></td>';
+            }
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        html += '</body></html>';
+        return html;
+    }
+
+    // ============================================================
+    //  📥 دانلود Word
+    // ============================================================
     function generateWordFile(className, students) {
         if (!students || students.length === 0) {
             alert('❌ هیچ داده‌ای یافت نشد!');
             return;
         }
 
-        var htmlContent = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
-        htmlContent += '<head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">';
-        htmlContent += '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->';
-        htmlContent += '<style>@page { size: A4 landscape; margin: 1.5cm; }';
-        htmlContent += 'table { border-collapse: collapse; width: 100%; font-family: "B Nazanin", "Tahoma", sans-serif; font-size: 12pt; direction: rtl; }';
-        htmlContent += 'th { background-color: #e0e0e0; font-weight: bold; border: 1px solid #000; padding: 8px 10px; text-align: center; }';
-        htmlContent += 'td { border: 1px solid #000; padding: 6px 8px; text-align: center; }';
-        htmlContent += 'h2, h3 { text-align: center; font-family: "B Nazanin", "Tahoma", sans-serif; }';
-        htmlContent += '</style></head><body>';
+        var htmlContent = buildPrintHTML(className, students, true);
 
-        htmlContent += '<h2>لیست دانش‌آموزان</h2><br>';
-        htmlContent += '<h3>لیست دانش آموزان کلاس ' + escapeHtml(className) + ' (تعداد: ' + students.length + ')</h3>';
-        htmlContent += '<table><thead><tr><th>ردیف</th><th>کد دانش‌آموزی</th><th>نام خانوادگی و نام</th>';
-        for (var i = 0; i < 10; i++) htmlContent += '<th></th>';
-        htmlContent += '</tr></thead><tbody>';
-
-        students.forEach(function(s, index) {
-            htmlContent += '<tr><td>' + (index + 1) + '</td><td>' + escapeHtml(s.code) + '</td><td>' + escapeHtml((s.family + ' ' + s.name).trim()) + '</td>';
-            for (var j = 0; j < 10; j++) htmlContent += '<td></td>';
-            htmlContent += '</tr>';
-        });
-
-        htmlContent += '</tbody></table></body></html>';
-
-        var blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
+        var blob = new Blob(['\ufeff' + htmlContent], { type: 'application/msword;charset=utf-8' });
         var link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         var safeName = className.replace(/[^\u0600-\u06FF\w\s\-]/g, '').replace(/\s+/g, ' ').trim();
@@ -4661,6 +4742,144 @@ function extractClassListTool() {
         link.click();
         document.body.removeChild(link);
         setTimeout(function(){ URL.revokeObjectURL(link.href); }, 1000);
+    }
+
+    // ============================================================
+    //  🖨️ چاپ یک کلاس
+    // ============================================================
+    function printClassList(className, students) {
+        if (!students || students.length === 0) {
+            alert('❌ هیچ داده‌ای برای چاپ وجود ندارد!');
+            return;
+        }
+
+        var htmlContent = buildPrintHTML(className, students, false);
+
+        var iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+        document.body.appendChild(iframe);
+
+        var doc = iframe.contentWindow.document;
+        doc.open();
+        doc.write(htmlContent);
+        doc.close();
+
+        setTimeout(function() {
+            try {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+            } catch(e) {
+                alert('❌ خطا در چاپ: ' + e.message);
+            }
+            setTimeout(function() {
+                if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+            }, 3000);
+        }, 800);
+
+        showStatus('🖨️ پنجرهٔ چاپ باز شد — «Save as PDF» را انتخاب کن', 'info');
+    }
+
+    // ============================================================
+    //  🖨️ چاپ همهٔ کلاس‌ها (هر کلاس یک صفحه جدا)
+    // ============================================================
+    function printAllClasses() {
+        if (allClasses.length === 0) {
+            alert('❌ هیچ کلاسی جمع‌آوری نشده است!');
+            return;
+        }
+
+        var totalStudents = allClasses.reduce((acc, cls) => acc + cls.students.length, 0);
+        if (!confirm('چاپ ' + allClasses.length + ' کلاس با مجموع ' + totalStudents + ' دانش‌آموز؟\n\nهر کلاس در یک صفحهٔ جدا.')) {
+            return;
+        }
+
+        // ساخت سند ترکیبی
+        var combined = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
+        combined += '<head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">';
+        combined += '<title>لیست دانش‌آموزان</title>';
+        combined += '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->';
+        combined += '<style>';
+        combined += '@page { size: A4 portrait; margin: 0.8cm 1cm 0.3cm 1cm; }';
+        combined += 'html, body { margin: 0; padding: 0; }';
+        combined += 'body { font-family: "B Nazanin", "Tahoma", sans-serif; direction: rtl; }';
+        combined += '.print-page { page-break-after: always; }';
+        combined += '.print-page:last-child { page-break-after: auto; }';
+        combined += '.header-line { text-align: center; font-weight: bold; margin: 0 0 6px 0; padding: 3px 0 6px 0; border-bottom: 1.5px solid #000; white-space: nowrap; overflow: hidden; }';
+        combined += '.header-line .label { font-weight: normal; }';
+        combined += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; }';
+        combined += 'th { background-color: #e8e8e8; font-weight: bold; border: 1px solid #000; text-align: center; }';
+        combined += 'td { border: 1px solid #000; text-align: center; }';
+        combined += 'td.name-cell { text-align: center; padding: 0 4px; }';
+        combined += 'tr { page-break-inside: avoid; }';
+        combined += 'table { page-break-inside: avoid; }';
+        combined += '</style></head><body>';
+
+        allClasses.forEach(function(cls) {
+            var count = cls.students.length;
+            var st = getAdaptiveStyle(count);
+
+            combined += '<div class="print-page">';
+            combined += '<div class="header-line" style="font-size:' + st.headerFont + 'pt;">';
+            combined += 'لیست دانش آموزان کلاس ' + escapeHtml(cls.className);
+            combined += ' &nbsp;&nbsp;&nbsp; تعداد : ' + count;
+            combined += ' &nbsp;&nbsp;&nbsp; <span class="label">نام آموزگار:</span>';
+            combined += '</div>';
+
+            combined += '<table style="font-size:' + st.fontSize + 'pt;">';
+            combined += '<colgroup>';
+            combcombined += '<col style="width:5%;">';
+            combined += '<col style="width:15%;">';
+            combined += '<col style="width:30%;">';
+           for (var c = 0; c < 10; c++) combined += '<col style="width:5%;">';
+            combined += '</colgroup>';
+            combined += '<thead><tr>';
+            combined += '<th style="padding:' + st.headerPaddingV + 'px 3px;font-size:' + (st.fontSize + 0.5) + 'pt;">ردیف</th>';
+            combined += '<th style="padding:' + st.headerPaddingV + 'px 3px;font-size:' + (st.fontSize + 0.5) + 'pt;">کد دانش‌آموزی</th>';
+            combined += '<th style="padding:' + st.headerPaddingV + 'px 3px;font-size:' + (st.fontSize + 0.5) + 'pt;">نام خانوادگی و نام</th>';
+            for (var h = 0; h < 10; h++) {
+                combined += '<th style="padding:' + st.headerPaddingV + 'px 3px;font-size:' + (st.fontSize + 0.5) + 'pt;"></th>';
+            }
+            combined += '</tr></thead><tbody>';
+
+            cls.students.forEach(function(s, i) {
+                combined += '<tr>';
+                combined += '<td style="padding:' + st.paddingV + 'px 3px;">' + (i + 1) + '</td>';
+                combined += '<td style="padding:' + st.paddingV + 'px 3px;font-size:' + st.codeFont + 'pt;">' + escapeHtml(s.code) + '</td>';
+                combined += '<td class="name-cell" style="padding:' + st.paddingV + 'px 3px;">' + escapeHtml((s.family + ' ' + s.name).trim()) + '</td>';
+                for (var j = 0; j < 10; j++) {
+                    combined += '<td style="padding:' + st.paddingV + 'px 3px;"></td>';
+                }
+                combined += '</tr>';
+            });
+
+            combined += '</tbody></table>';
+            combined += '</div>';
+        });
+
+        combined += '</body></html>';
+
+        var iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+        document.body.appendChild(iframe);
+
+        var doc = iframe.contentWindow.document;
+        doc.open();
+        doc.write(combined);
+        doc.close();
+
+        setTimeout(function() {
+            try {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+            } catch(e) {
+                alert('❌ خطا در چاپ: ' + e.message);
+            }
+            setTimeout(function() {
+                if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+            }, 3000);
+        }, 800);
+
+        showStatus('🖨️ چاپ همهٔ کلاس‌ها (' + allClasses.length + ' صفحه)', 'info');
     }
 
     function showStatus(text, type) {
@@ -4700,9 +4919,10 @@ function extractClassListTool() {
                     if (cls.students.length > 1) html += '، ' + escapeHtml(cls.students[1].family + ' ' + cls.students[1].name);
                     html += '</div>';
                 }
-                html += '<div style="display:flex;gap:6px;">';
-                html += '<button class="download-class-btn" data-index="' + index + '" style="flex:1;background:#10b981;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">📄 دانلود ورد</button>';
-                html += '<button class="delete-class-btn" data-index="' + index + '" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">🗑️</button>';
+                html += '<div style="display:flex;gap:5px;">';
+                html += '<button class="download-class-btn" data-index="' + index + '" title="دانلود ورد" style="flex:1;background:#10b981;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">📄 دانلود</button>';
+                html += '<button class="print-class-btn" data-index="' + index + '" title="چاپ / PDF" style="flex:1;background:#3b82f6;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">🖨️ چاپ</button>';
+                html += '<button class="delete-class-btn" data-index="' + index + '" title="حذف" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">🗑️</button>';
                 html += '</div></div>';
             });
             classListEl.innerHTML = html;
@@ -4712,6 +4932,14 @@ function extractClassListTool() {
                     let index = parseInt(btn.getAttribute('data-index'));
                     let cls = allClasses[index];
                     if (cls) generateWordFile(cls.className, cls.students);
+                };
+            });
+
+            document.querySelectorAll('.print-class-btn').forEach(function(btn) {
+                btn.onclick = function() {
+                    let index = parseInt(btn.getAttribute('data-index'));
+                    let cls = allClasses[index];
+                    if (cls) printClassList(cls.className, cls.students);
                 };
             });
 
@@ -4731,7 +4959,6 @@ function extractClassListTool() {
 
     // ============================================================
     //  🆕 روش جدید: استفاده از Angular خود سیدا
-    //  - برای مواقعی که تأیید نهایی کلاس‌بندی زده نشده
     // ============================================================
     async function extractByClassesNew() {
         if (isRunning) { showStatus('⚠️ در حال اجراست...', 'error'); return; }
@@ -4773,7 +5000,6 @@ function extractClassListTool() {
             let g = grades[gi];
             showStatus('⏳ پایه ' + g.gradeName + ' (' + (gi + 1) + '/' + grades.length + ')...', 'info');
 
-            // پیدا کردن ردیف این پایه
             let gradeRow = null;
             let allRows = document.querySelectorAll('table.table-bordered tbody tr');
             for (let r = 0; r < allRows.length; r++) {
@@ -4802,7 +5028,6 @@ function extractClassListTool() {
                 continue;
             }
 
-            // اگه مودال قبلی بازه، ببندش
             let existingModal = document.querySelector('[uib-modal-window]');
             if (existingModal) {
                 try {
@@ -4817,7 +5042,6 @@ function extractClassListTool() {
 
             assignBtn.click();
 
-            // انتظار برای باز شدن modal
             let modal = null;
             let scope = null;
             for (let wait = 0; wait < 30; wait++) {
@@ -4842,7 +5066,6 @@ function extractClassListTool() {
 
             await sleep(2000);
 
-            // برای هر کلاس این پایه
             let classes = scope.comboOptionClassNames.slice();
 
             for (let ci = 0; ci < classes.length; ci++) {
@@ -4853,7 +5076,6 @@ function extractClassListTool() {
                 showStatus('⏳ (' + currentClassNum + '/' + totalClasses + ') ' + cls.name + '...', 'info');
 
                 try {
-                    // تغییر به این کلاس
                     if (scope.$$phase) {
                         scope.model.classNameId = cls.id;
                     } else {
@@ -4915,7 +5137,6 @@ function extractClassListTool() {
                 }
             }
 
-            // بستن مودال این پایه
             try {
                 let closeBtn = null;
                 let allBtns = modal.querySelectorAll('button');
@@ -4994,13 +5215,22 @@ function extractClassListTool() {
                     '</ul>' +
                 '</div>' +
 
+                '<div style="background:#f5f3ff;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #8b5cf6;">' +
+                    '<h3 style="color:#5b21b6;margin-bottom:10px;font-size:18px;">🖨️ چاپ / PDF</h3>' +
+                    '<ul style="margin-right:20px;margin-top:8px;">' +
+                        '<li>هر کلاس دکمهٔ «🖨️ چاپ» جداگانه دارد</li>' +
+                        '<li>دکمهٔ «🖨️ چاپ همه» همهٔ کلاس‌ها را در یک سند می‌فرستد (هر کلاس یک صفحه)</li>' +
+                        '<li>فونت و اندازهٔ جدول خودکار بر اساس تعداد دانش‌آموز تنظیم می‌شه</li>' +
+                        '<li>در پنجرهٔ چاپ «Save as PDF» یا «Microsoft Print to PDF» را انتخاب کن</li>' +
+                    '</ul>' +
+                '</div>' +
+
                 '<div style="background:#fef2f2;padding:14px;border-radius:8px;border-right:4px solid #ef4444;">' +
                     '<h3 style="color:#991b1b;margin-bottom:10px;font-size:18px;">⚠️ نکات مهم</h3>' +
                     '<ul style="margin-right:20px;">' +
                         '<li>صفحه باید در قسمت «کلاس‌بندی» (#/SchoolClasses) باشه</li>' +
-                        '<li>بعد از جمع‌آوری، دکمهٔ «📥 دانلود همه» رو بزن</li>' +
-                        '<li>برای توقف، دکمهٔ «⛔ توقف» رو بزن</li>' +
                         '<li>در طول عملیات مرورگر رو نبند</li>' +
+                        '<li>برای توقف، دکمهٔ «⛔ توقف» رو بزن</li>' +
                     '</ul>' +
                 '</div>' +
 
@@ -5042,7 +5272,10 @@ function extractClassListTool() {
             '<div style="background:#fff7ed;padding:8px;border-radius:6px;font-size:14px;color:#9a3412;text-align:center;border:1px solid #fed7aa;margin-bottom:6px;">⚠️ اگه تأیید نهایی کلاس‌بندی نزدی:</div>' +
             '<button id="btnClassExtractNew" style="width:100%;background:#f59e0b;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;margin-bottom:8px;">📋 لیست کلاسی</button>' +
             '<button id="btnStop" style="width:100%;background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;display:none;margin-bottom:8px;font-size:14px;">⛔ توقف</button>' +
-            '<button id="btnDownloadAll" style="width:100%;background:#10b981;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;margin-bottom:8px;font-size:14px;">📥 دانلود همه (Word)</button>' +
+            '<div style="display:flex;gap:6px;margin-bottom:8px;">' +
+                '<button id="btnDownloadAll" style="flex:1;background:#10b981;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:13px;">📥 دانلود همه</button>' +
+                '<button id="btnPrintAll" style="flex:1;background:#8b5cf6;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:13px;">🖨️ چاپ همه</button>' +
+            '</div>' +
             '<button id="btnReset" style="background:transparent;color:#888899;border:1px solid #2a2d42;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:14px;width:100%;margin-bottom:10px;">🔄 پاک کردن همه</button>' +
             '<div style="font-size:14px;color:#888899;margin-bottom:6px;">کلاس‌های جمع‌آوری شده:</div>' +
             '<div id="classList" style="background:#0f1117;border-radius:8px;padding:8px;max-height:300px;overflow-y:auto;font-size:14px;">' +
@@ -5171,6 +5404,11 @@ function extractClassListTool() {
             }
         };
 
+        // ===== دکمه چاپ همه =====
+        document.getElementById('btnPrintAll').onclick = function() {
+            printAllClasses();
+        };
+
         document.getElementById('btnReset').onclick = function() {
             if (confirm('پاک کردن همه کلاس‌ها؟')) {
                 allClasses = [];
@@ -5183,7 +5421,6 @@ function extractClassListTool() {
 
     createPanel();
 }
-  
  // ==================== ابزار ۱۱: استخراج مشخصات (نسخه API) ====================
     function smartInfoExtractTool() {
         if (document.getElementById('autoExtractPanel')) {
