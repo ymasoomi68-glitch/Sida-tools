@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📱 داشبورد موبایل ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.7.2
+// @version      15.7.3
 // @description  نسخه موبایل داشبورد15 ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
