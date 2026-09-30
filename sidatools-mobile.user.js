@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📱 داشبورد موبایل ابزارهای سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.7.3
+// @version      15.7.4
 // @description  نسخه موبایل داشبورد15 ابزار سیدا - قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -5107,6 +5107,7 @@ function extractClassListTool() {
 
     createPanel();
 }
+ 
  // ==================== ابزار ۱۱: استخراج مشخصات (نسخه API) ====================
     function smartInfoExtractTool() {
         if (document.getElementById('autoExtractPanel')) {
@@ -5331,21 +5332,31 @@ function extractClassListTool() {
         }
 
         function mapRecord(item) {
-            var fatherPhone = normalizePhone(item.fatherMobileNumber);
-            var motherPhone = normalizePhone(item.motherMobileNumber);
-            var shadPhone = normalizePhone(item.studentMobileNumber);
+    var fatherPhone = normalizePhone(item.fatherMobileNumber);
+    var motherPhone = normalizePhone(item.motherMobileNumber);
+    var shadPhone = normalizePhone(item.studentMobileNumber);
 
-            return {
-                name: (item.firstName || '').trim(),
-                family: (item.lastName || '').trim(),
-                father: (item.fatherName || '').trim(),
-                codemelli: String(item.nationalCode || '').trim(),
-                birthDate: String(item.birthDate || '').trim(),
-                fatherPhone: fatherPhone,
-                motherPhone: motherPhone,
-                shadPhone: shadPhone
-            };
-        }
+    // ✅ ترجمه gradeTypeId به نام پایه (تأیید شده از تست)
+    var gradeMap = {
+        1: 'اول', 2: 'دوم', 3: 'سوم', 4: 'چهارم', 5: 'پنجم', 6: 'ششم',
+        7: 'هفتم', 8: 'هشتم', 9: 'نهم',
+        10: 'دهم', 11: 'یازدهم', 12: 'دوازدهم'
+    };
+    var gid = item.gradeTypeId;
+    var gradeName = (gid && gradeMap[gid]) ? gradeMap[gid] : (item.gradeName || '');
+
+    return {
+        name: (item.firstName || '').trim(),
+        family: (item.lastName || '').trim(),
+        father: (item.fatherName || '').trim(),
+        codemelli: String(item.nationalCode || '').trim(),
+        birthDate: String(item.birthDate || '').trim(),
+        grade: gradeName,                    // ✅ 'چهارم' یا 'پنجم'
+        fatherPhone: fatherPhone,
+        motherPhone: motherPhone,
+        shadPhone: shadPhone
+    };
+}
 
         async function startExtraction() {
             if (isRunning) {
@@ -5429,14 +5440,15 @@ function extractClassListTool() {
                 let contactInfo = contactParts.join('<br>');
 
                 tableRows += '<tr>' +
-                    '<td style="border:1px solid #999;padding:6px;text-align:center;">' + (i+1) + '</td>' +
-                    '<td style="border:1px solid #999;padding:6px;">' + escapeHtml(s.family) + '</td>' +
-                    '<td style="border:1px solid #999;padding:6px;">' + escapeHtml(s.name) + '</td>' +
-                    '<td style="border:1px solid #999;padding:6px;">' + escapeHtml(s.father) + '</td>' +
-                    '<td style="border:1px solid #999;padding:6px;text-align:center;">' + escapeHtml(s.codemelli) + '</td>' +
-                    '<td style="border:1px solid #999;padding:6px;text-align:center;">' + escapeHtml(s.birthDate) + '</td>' +
-                    '<td style="border:1px solid #999;padding:8px;text-align:right;direction:rtl;line-height:1.8;font-size:10pt;">' + contactInfo + '</td>' +
-                    '</tr>';
+               '<td style="border:1px solid #999;padding:6px;text-align:center;">' + (i+1) + '</td>' +
+               '<td style="border:1px solid #999;padding:6px;">' + escapeHtml(s.family) + '</td>' +
+               '<td style="border:1px solid #999;padding:6px;">' + escapeHtml(s.name) + '</td>' +
+               '<td style="border:1px solid #999;padding:6px;">' + escapeHtml(s.father) + '</td>' +
+               '<td style="border:1px solid #999;padding:6px;text-align:center;">' + escapeHtml(s.grade || '-') + '</td>' +   // ✅ اضافه شد
+               '<td style="border:1px solid #999;padding:6px;text-align:center;">' + escapeHtml(s.codemelli) + '</td>' +
+               '<td style="border:1px solid #999;padding:6px;text-align:center;">' + escapeHtml(s.birthDate) + '</td>' +
+               '<td style="border:1px solid #999;padding:8px;text-align:right;direction:rtl;line-height:1.8;font-size:10pt;">' + contactInfo + '</td>' +
+               '</tr>';
             });
 
             let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
@@ -5448,7 +5460,7 @@ function extractClassListTool() {
                 '<h2>لیست کامل مشخصات دانش‌آموزان و شماره‌های تماس</h2>' +
                 '<p style="text-align:center;font-weight:bold;">تعداد کل: ' + allStudents.length + ' نفر</p>' +
                 '<table><thead><tr>' +
-                '<th>ردیف</th><th>نام خانوادگی</th><th>نام</th><th>نام پدر</th><th>کد ملی</th><th>تاریخ تولد</th><th style="width:280px;">شماره‌های تماس</th>' +
+                '<th>ردیف</th><th>نام خانوادگی</th><th>نام</th><th>نام پدر</th><th>پایه</th><th>کد ملی</th><th>تاریخ تولد</th><th style="width:280px;">شماره‌های تماس</th>' +
                 '</tr></thead><tbody>' + tableRows + '</tbody></table></body></html>';
 
             let blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
@@ -5469,32 +5481,33 @@ function extractClassListTool() {
             var rows = [];
             // هدر
             rows.push([
-                'ردیف',
-                'نام',
-                'نام خانوادگی',
-                'نام پدر',
-                'کد ملی',
-                'تاریخ تولد',
-                'موبایل پدر',
-                'موبایل مادر',
-                'موبایل شاد'
-            ]);
+    'ردیف',
+    'نام',
+    'نام خانوادگی',
+    'نام پدر',
+    'پایه',                 // ✅ اضافه شد
+    'کد ملی',
+    'تاریخ تولد',
+    'موبایل پدر',
+    'موبایل مادر',
+    'موبایل شاد'
+]);
 
             // داده‌ها
-            allStudents.forEach(function(s, i) {
-                rows.push([
-                    (i + 1),
-                    s.name || '',
-                    s.family || '',
-                    s.father || '',
-                    s.codemelli || '',
-                    s.birthDate || '',
-                    s.fatherPhone || '',
-                    s.motherPhone || '',
-                    s.shadPhone || ''
-                ]);
-            });
-
+           allStudents.forEach(function(s, i) {
+    rows.push([
+        (i + 1),
+        s.name || '',
+        s.family || '',
+        s.father || '',
+        s.grade || '',              // ✅ اضافه شد
+        s.codemelli || '',
+        s.birthDate || '',
+        s.fatherPhone || '',
+        s.motherPhone || '',
+        s.shadPhone || ''
+    ]);
+});
             // ساخت CSV
             var csv = '\uFEFF';
             rows.forEach(function(row) {
@@ -6315,8 +6328,8 @@ function extractClassListTool() {
                      '<button id="btnClear" style="background:#fff;color:#c62828;border:1px solid #c62828;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:14px;margin-top:5px;">🗑️ پاک‌سازی</button>' +
                 '</div>';
             document.body.appendChild(panel);
-            makeDraggable(panel, document.getElementById('aeHeader'));            // ← برای ماوس (دسکتاپ)
-            makeDraggableByTouch(panel, document.getElementById('aeHeader'));     // ← برای لمس (موبایل)
+            makeDraggable(panel, document.getElementById('aeHeader'));
+            makeDraggableByTouch(panel, document.getElementById('aeHeader'));
             document.getElementById('btnClosePanel').addEventListener('click', function() {
                 panel.remove();
             });
@@ -6340,6 +6353,8 @@ function extractClassListTool() {
 
         showNotification('پنل آماده است. دکمه "شروع" را بزنید.');
     }
+
+
     
 	    // ==================== ابزار ۱۲: تحلیل نمرات ====================
     function gradeAnalysisTool() {
