@@ -2097,10 +2097,10 @@ render();
                 editBtn.click();
                 await sleep(3000);
 
-                var editPhotoBtn = null;
+                               var editPhotoBtn = null;
                 var buttons = document.querySelectorAll('button, a, span');
-                for (var btn of buttons) {
-                    var text = btn.textContent ? btn.textContent.trim() : '';
+                for (let btn of buttons) {
+                    let text = btn.textContent ? btn.textContent.trim() : '';
                     if (text.includes('ویرایش عکس') || text.includes('تغییر عکس') || text.includes('آپلود عکس') || text.includes('انتخاب عکس')) {
                         editPhotoBtn = btn;
                         break;
@@ -2134,10 +2134,10 @@ render();
                 fileInput.dispatchEvent(new Event('input', { bubbles: true }));
                 await sleep(3000);
 
-                var confirmBtn = null;
+                                var confirmBtn = null;
                 var allButtons = document.querySelectorAll('button, span, a');
-                for (var btn of allButtons) {
-                    var text = btn.textContent ? btn.textContent.trim() : '';
+                for (let btn of allButtons) {
+                    let text = btn.textContent ? btn.textContent.trim() : '';
                     if (text.includes('اعتبار سنجی و تایید') || text.includes('اعتبارسنجی') || text.includes('تایید') || text.includes('ذخیره') || text.includes('ثبت')) {
                         confirmBtn = btn;
                         break;
