@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛠️ جعبه ابزار هوشمند سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.7.4
+// @version      15.7.5
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -51,7 +51,7 @@
     const DEFAULT_Y = 25;
 
     // ==================== تابع هش کردن ====================
-        function hashString(str) {
+    function hashString(str) {
         const salt = 'masoomi68_sida_tool_v15';
         const combined = str + salt;
         let hash1 = 0x811c9dc5;
@@ -74,55 +74,151 @@
             .replace(/[\u0660-\u0669]/g, function(d) { return String(d.charCodeAt(0) - 0x0660); });
     }
 
-        // ==================== تابع خواندن کد مدرسه از سیدا ====================
+    // ==================== تابع خواندن کد مدرسه از سیدا (نسخهٔ جامع ۷ روش) ====================
     function getCurrentSchoolCode() {
-        // ✅ روش ۱ (بهترین): از Angular scope ($root.userContext.schoolId)
+        // ✅ روش ۰ (کش): از sessionStorage — اگه قبلاً پیدا شده
+        try {
+            var cached = sessionStorage.getItem('sida_school_code_cache');
+            if (cached) {
+                var m0 = toEnglishDigits(cached).match(/(\d{8,10})/);
+                if (m0 && m0[1]) return m0[1];
+            }
+        } catch (e) {}
+
+        // ✅ روش ۱: از Angular scope ($root.userContext.schoolId)
         try {
             var scope = angular.element(document.body).scope();
             if (scope) {
                 var uc = null;
-                // اول $root.userContext
                 if (scope.$root && scope.$root.userContext && scope.$root.userContext.schoolId) {
                     uc = scope.$root.userContext;
-                }
-                // بعد userContext
-                else if (scope.userContext && scope.userContext.schoolId) {
+                } else if (scope.userContext && scope.userContext.schoolId) {
                     uc = scope.userContext;
-                }
-                // یا از طریق $root
-                else if (scope.$root && scope.$root.userContext) {
+                } else if (scope.$root && scope.$root.userContext) {
                     uc = scope.$root.userContext;
                 }
-
                 if (uc && uc.schoolId) {
                     var sid = toEnglishDigits(String(uc.schoolId).trim());
                     var m = sid.match(/(\d{8,10})/);
-                    if (m && m[1]) return m[1];
+                    if (m && m[1]) {
+                        try { sessionStorage.setItem('sida_school_code_cache', m[1]); } catch (e) {}
+                        return m[1];
+                    }
                 }
             }
         } catch (e) {}
 
-        // ✅ روش ۲ (پشتیبان): از ng-bind="schoolId"
+        // ✅ روش ۲: از ng-bind="schoolId"
         try {
             var schoolIdEl = document.querySelector('[ng-bind*="schoolId"]');
             if (schoolIdEl) {
                 var text = (schoolIdEl.textContent || '').trim();
                 var norm = toEnglishDigits(text);
                 var match = norm.match(/(\d{8,10})/);
-                if (match && match[1]) return match[1];
+                if (match && match[1]) {
+                    try { sessionStorage.setItem('sida_school_code_cache', match[1]); } catch (e) {}
+                    return match[1];
+                }
             }
         } catch (e) {}
 
-        // ✅ روش ۳ (پشتیبان دوم): از DOM — کد چسبیده به متن
+        // ✅ روش ۳: از localStorage/sessionStorage — کلیدهای شناخته‌شده
+        try {
+            var storageKeys = ['schoolId', 'school_id', 'schoolCode', 'currentSchoolId', 'schoolid', 'school_code'];
+            for (var k = 0; k < storageKeys.length; k++) {
+                var val = localStorage.getItem(storageKeys[k]) || sessionStorage.getItem(storageKeys[k]);
+                if (val) {
+                    var norm2 = toEnglishDigits(String(val).trim());
+                    var m2 = norm2.match(/(\d{8,10})/);
+                    if (m2 && m2[1]) {
+                        try { sessionStorage.setItem('sida_school_code_cache', m2[1]); } catch (e) {}
+                        return m2[1];
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // ✅ روش ۴: جستجو در localStorage برای هر کلید حاوی «school»
+        try {
+            for (var i = 0; i < localStorage.length; i++) {
+                var lkey = localStorage.key(i);
+                if (!lkey || !/school/i.test(lkey)) continue;
+                var lval = localStorage.getItem(lkey);
+                if (!lval) continue;
+                var norm3 = toEnglishDigits(String(lval).trim());
+                var m3 = norm3.match(/(\d{8,10})/);
+                if (m3 && m3[1]) {
+                    try { sessionStorage.setItem('sida_school_code_cache', m3[1]); } catch (e) {}
+                    return m3[1];
+                }
+            }
+        } catch (e) {}
+
+        // ✅ روش ۵: عناصر DOM حاوی «مدرسه» یا «آموزشگاه»
+        try {
+            var allEls = document.querySelectorAll('span, div, p, td, footer, label, a, h1, h2, h3, h4');
+            for (var j = 0; j < allEls.length; j++) {
+                var el = allEls[j];
+                if (el.children.length > 5) continue;
+                var txt = (el.textContent || '').trim();
+                if (txt.length > 500) continue;
+                if (txt.indexOf('مدرسه') > -1 || txt.indexOf('آموزشگاه') > -1 || txt.indexOf('واحد') > -1) {
+                    var norm4 = toEnglishDigits(txt);
+                    var m4 = norm4.match(/(\d{8,10})/);
+                    if (m4 && m4[1]) {
+                        try { sessionStorage.setItem('sida_school_code_cache', m4[1]); } catch (e) {}
+                        return m4[1];
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // ✅ روش ۶: از کل body با regex — «مدرسه NUMBER» حتی بدون کلمهٔ «کد»
+        try {
+            var bodyText = document.body.innerText || '';
+            var normBody = toEnglishDigits(bodyText);
+            var patterns = [
+                /کاربر\s*مدرسه\s*(\d{8,10})/,
+                /کد\s*مدرسه\s*(\d{8,10})/,
+                /مدرسه\s*(\d{8,10})/,
+                /کد\s*آموزشگاه\s*(\d{8,10})/,
+                /آموزشگاه\s*(\d{8,10})/,
+                /واحد\s*(\d{8,10})/,
+                /"schoolId"\s*:\s*"?(\d{8,10})"?/i
+            ];
+            for (var p = 0; p < patterns.length; p++) {
+                var pm = normBody.match(patterns[p]);
+                if (pm && pm[1]) {
+                    try { sessionStorage.setItem('sida_school_code_cache', pm[1]); } catch (e) {}
+                    return pm[1];
+                }
+            }
+        } catch (e) {}
+
+        // ✅ روش ۷: span هایی که با عدد ۸-۱۰ رقمی شروع می‌شن (نسخهٔ قدیم)
         try {
             var spans = document.querySelectorAll('span');
-            for (var i = 0; i < spans.length; i++) {
-                var t = (spans[i].textContent || '').trim();
-                // اگه با عدد شروع بشه (مثل "96118256آتا...")
+            for (var s = 0; s < spans.length; s++) {
+                var t = (spans[s].textContent || '').trim();
                 if (/^\d{8,10}/.test(toEnglishDigits(t))) {
                     var n = toEnglishDigits(t);
                     var mm = n.match(/^(\d{8,10})/);
-                    if (mm && mm[1]) return mm[1];
+                    if (mm && mm[1]) {
+                        try { sessionStorage.setItem('sida_school_code_cache', mm[1]); } catch (e) {}
+                        return mm[1];
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // ✅ روش ۸ (نهایی): چک کد دستی ذخیره‌شده از قبل
+        try {
+            var saved = localStorage.getItem('sida_school_code_manual');
+            if (saved) {
+                var mS = toEnglishDigits(saved).match(/(\d{8,10})/);
+                if (mS && mS[1]) {
+                    try { sessionStorage.setItem('sida_school_code_cache', mS[1]); } catch (e) {}
+                    return mS[1];
                 }
             }
         } catch (e) {}
@@ -143,6 +239,36 @@
         return { allowed: false, current: currentCode, reason: 'mismatch' };
     }
 
+    // ==================== تابع بررسی دسترسی با تلاش مجدد (async) ====================
+    function checkSchoolAccessWithRetry(maxAttempts, delayMs) {
+        maxAttempts = maxAttempts || 6;
+        delayMs = delayMs || 500;
+
+        return new Promise(function(resolve) {
+            let attempts = 0;
+
+            function tryOnce() {
+                attempts++;
+                const access = checkSchoolAccess();
+
+                if (access.allowed) {
+                    console.log('✅ [تلاش ' + attempts + '] کد مدرسه پیدا شد: ' + access.current);
+                    resolve(access);
+                    return;
+                }
+
+                if (attempts < maxAttempts) {
+                    console.log('⏳ [تلاش ' + attempts + '/' + maxAttempts + '] کد مدرسه پیدا نشد، تلاش مجدد...');
+                    setTimeout(tryOnce, delayMs);
+                } else {
+                    console.warn('❌ بعد از ' + maxAttempts + ' تلاش، کد مدرسه پیدا نشد');
+                    resolve(access);
+                }
+            }
+
+            tryOnce();
+        });
+    }
     // ==================== تابع نمایش خطای غیر مجاز ====================
     function showUnauthorizedError(schoolCode) {
         const overlay = document.createElement('div');
