@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛠️ جعبه ابزار هوشمند سیدا
 // @namespace    http://tampermonkey.net/
-// @version      15.7.5
+// @version      16.0.0
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -45,7 +45,6 @@
 	    '9aefb234a56dae10',  // کد مدرسه 40990635
         '4fd0c64c157f4148'   // کد مدرسه 80059089
     ];
-
     // ==================== مختصات پیش‌فرض ====================
     const DEFAULT_X = 230;
     const DEFAULT_Y = 25;
@@ -269,6 +268,7 @@
             tryOnce();
         });
     }
+
     // ==================== تابع نمایش خطای غیر مجاز ====================
     function showUnauthorizedError(schoolCode) {
         const overlay = document.createElement('div');
@@ -420,7 +420,8 @@
             'extractPanel',
             'gradeCollectorPanel',
             'gradePanel',
-            'nationalityPanel'
+            'nationalityPanel',
+             'estelamPanel'
         ];
 
         panelIds.forEach(id => {
@@ -795,8 +796,17 @@
                 action: function() {
                     closeDrawer();
                     pasteFromBinaTool();
-                }
-            }
+                 }
+            },
+            {
+        name: '🔍 استعلام ثبت احوال',
+        desc: 'استعلام خودکار ثبت احوال / شناسهٔ یکتا برای همهٔ دانش‌آموزان',
+        color: '#00bcd4',
+        action: function() {
+        closeDrawer();
+          estelamSabtAhvalTool();
+        }
+     }
         ];
 
         // ==================== مرتب‌سازی بر اساس ترتیب ذخیره‌شده ====================
@@ -2025,469 +2035,1368 @@ render();
         }
         init();
     }
-    // ==================== ابزار ۴: آپلود خودکار عکس دانش‌آموزان ====================
-    function photoUploadTool() {
-        /* طراح: یوسف معصومی - شاغل در آموزش و پرورش ناحیه ۳ تبریز */
-        if (!photoUploadTool.toString().includes('یوسف معصومی') || !photoUploadTool.toString().includes('ناحیه ۳ تبریز')) {
-            alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
+   // ==================== ابزار ۴: آپلود خودکار عکس (نسخهٔ API) ====================
+function photoUploadTool() {
+    /* طراح: یوسف معصومی - شاغل در آموزش و پرورش ناحیه ۳ تبریز */
+    if (!photoUploadTool.toString().includes('یوسف معصومی') ||
+        !photoUploadTool.toString().includes('ناحیه ۳ تبریز')) {
+        alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
+        return;
+    }
+
+    cleanupAllPanels();
+
+    if (document.getElementById('uploadPanel')) {
+        document.getElementById('uploadPanel').remove();
+    }
+
+    // ==================== کلیدهای ذخیره‌سازی ====================
+    const PROGRESS_KEY = 'photo_upload_progress_v2';
+    const UPLOAD_URL = 'api/FileManager/InsertFile';
+
+    // ==================== متغیرها ====================
+    let photoFiles = [];
+    let photoMap = {};
+    let allStudents = [];
+    let pendingStudents = [];
+    let currentIndex = 0;
+    let isRunning = false;
+    let isPaused = false;
+    let isStopped = false;
+    let totalProcessed = 0;
+    let totalSkipped = 0;
+    let totalFailed = 0;
+    let errorDetails = [];
+
+    // ==================== داده‌های گزارش ====================
+    let reportData = {
+        success: [],
+        failed: [],
+        noFile: [],
+        startTime: null,
+        endTime: null
+    };
+
+    // ==================== توابع کمکی ====================
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = String(text);
+        return div.innerHTML;
+    }
+
+    function showNotification(text, duration) {
+        duration = duration || 5000;
+        let old = document.getElementById('uploadNotif');
+        if (old) old.remove();
+        let notif = document.createElement('div');
+        notif.id = 'uploadNotif';
+        notif.style.cssText = 'position:fixed;bottom:20px;left:20px;background:#1a1a2e;color:white;padding:14px 22px;border-radius:8px;z-index:9999999;font-family:Tahoma,sans-serif;font-size:15px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:380px;direction:rtl;line-height:1.6;';
+        notif.textContent = text;
+        notif.addEventListener('click', () => notif.remove());
+        document.body.appendChild(notif);
+        if (duration !== 0) {
+            setTimeout(() => { if (notif.parentNode) notif.remove(); }, duration);
+        }
+    }
+
+    function getToken() {
+        try { var t = sessionStorage.getItem('token'); if (t) return t; } catch (e) {}
+        try { var t2 = localStorage.getItem('token'); if (t2) return t2; } catch (e) {}
+        return null;
+    }
+
+    function getClientId() {
+        try { var c1 = localStorage.getItem('pages-client-id'); if (c1) return c1; } catch (e) {}
+        try { var c2 = sessionStorage.getItem('pages-client-id'); if (c2) return c2; } catch (e) {}
+        return 'mt1ag7vh-f9qt51vf-is5kslgz-am182rru-3pu0h0ne';
+    }
+
+    function getXsrfToken() {
+        try {
+            var match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        } catch (e) { return ''; }
+    }
+
+    function fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const result = e.target.result;
+                const base64 = result.split(',')[1];
+                resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function getExtension(fileName) {
+        const ext = fileName.split('.').pop().toLowerCase();
+        if (ext === 'jpeg' || ext === 'jpg') return 'jpeg';
+        return 'jpeg';
+    }
+
+    function buildPhotoUrl(pathFromServer) {
+        if (!pathFromServer) return '';
+        try {
+            let path = String(pathFromServer);
+            path = path.replace(/\\/g, '/');
+            while (path.startsWith('/')) {
+                path = path.substring(1);
+            }
+            if (path.startsWith('http')) return path;
+            return location.origin + '/' + path;
+        } catch (e) {
+            return '';
+        }
+    }
+
+    // ==================== Progress ====================
+    function loadProgress() {
+        try {
+            const data = localStorage.getItem(PROGRESS_KEY);
+            if (data) return JSON.parse(data);
+        } catch (e) {}
+        return null;
+    }
+
+    function saveProgress() {
+        try {
+            localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+                currentIndex: currentIndex,
+                totalProcessed: totalProcessed,
+                totalSkipped: totalSkipped,
+                totalFailed: totalFailed,
+                errorDetails: errorDetails.slice(-50),
+                savedAt: Date.now()
+            }));
+        } catch (e) {}
+    }
+
+    function clearProgress() {
+        try { localStorage.removeItem(PROGRESS_KEY); } catch (e) {}
+    }
+
+    // ==================== فاز ۱: دریافت دانش‌آموزان از API ====================
+    async function fetchAllStudents() {
+        const pageSize = 500;
+        let page = 1;
+        let all = [];
+        let total = 0;
+        let hasMore = true;
+
+        const token = getToken();
+        if (!token) throw new Error('توکن پیدا نشد');
+
+        const clientId = getClientId();
+
+        let gridFilter = null;
+        try {
+            const gridEl = document.querySelector('.k-grid');
+            if (gridEl) {
+                const grid = $(gridEl).data('kendoGrid');
+                if (grid) gridFilter = grid.dataSource.filter();
+            }
+        } catch (e) {}
+
+        while (hasMore && isRunning) {
+            const body = {
+                take: pageSize,
+                skip: (page - 1) * pageSize,
+                page, pageSize,
+                sort: [{ field: 'id', dir: 'asc' }]
+            };
+            if (gridFilter) body.filter = gridFilter;
+
+            const response = await fetch('/api/Student/GetStudentInfo', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Authorization': 'Bearer ' + token,
+                    'client-id': clientId
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+
+            const json = await response.json();
+            const items = (json.data && json.data.data) || json.data || [];
+
+            if (!Array.isArray(items) || items.length === 0) break;
+
+            if (json.data && json.data.total) total = json.data.total;
+            all = all.concat(items);
+
+            setStatus(`دریافت شد: ${all.length}${total ? ' از ' + total : ''}`);
+
+            if (items.length < pageSize) hasMore = false;
+            else page++;
+
+            await sleep(100);
+        }
+
+        return all;
+    }
+
+    function hasPhoto(item) {
+        const path = item.path || '';
+        if (!path) return false;
+        if (path.includes('thumb_default') || path.includes('default.jpg')) return false;
+        return true;
+    }
+
+    // ==================== فاز ۲: خواندن فایل‌های عکس ====================
+    function selectPhotoFolder() {
+        return new Promise((resolve) => {
+            if (!('webkitdirectory' in document.createElement('input'))) {
+                alert('⚠️ مرورگر شما از انتخاب پوشه پشتیبانی نمی‌کند.\nلطفاً از Chrome یا Edge استفاده کنید.');
+                resolve([]);
+                return;
+            }
+
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.webkitdirectory = true;
+            input.multiple = true;
+            input.accept = 'image/jpeg,image/jpg';
+            input.style.cssText = 'position:fixed;top:-100px;left:0;opacity:0;pointer-events:none;';
+            document.body.appendChild(input);
+
+            let done = false;
+            const finish = (result) => {
+                if (done) return;
+                done = true;
+                setTimeout(() => { try { input.remove(); } catch (e) {} }, 100);
+                resolve(result);
+            };
+
+            const onFocus = () => {
+                setTimeout(() => finish([]), 1500);
+            };
+
+            input.onchange = function(e) {
+                const files = Array.from(e.target.files || []);
+                const images = files.filter(f =>
+                    f.type === 'image/jpeg' ||
+                    f.type === 'image/jpg' ||
+                    /\.(jpe?g)$/i.test(f.name)
+                );
+                finish(images);
+            };
+
+            input.addEventListener('cancel', () => finish([]));
+            input.click();
+            window.addEventListener('focus', onFocus, { once: true });
+        });
+    }
+
+    function buildPhotoMap(files) {
+        const map = {};
+        const duplicates = [];
+
+        for (let file of files) {
+            const baseName = file.name.replace(/\.[^.]+$/, '');
+            const digits = baseName.replace(/[^0-9]/g, '');
+            const matches = digits.match(/\d{10}/g);
+            if (matches) {
+                for (let code of matches) {
+                    if (map[code]) {
+                        duplicates.push({ code, existing: map[code].name, new: file.name });
+                    } else {
+                        map[code] = file;
+                    }
+                }
+            } else if (digits.length === 10) {
+                if (map[digits]) {
+                    duplicates.push({ code: digits, existing: map[digits].name, new: file.name });
+                } else {
+                    map[digits] = file;
+                }
+            }
+        }
+
+        return { map, duplicates };
+    }
+
+    // ==================== فاز ۳: آپلود یک عکس ====================
+    async function uploadPhoto(student) {
+        const nationalCode = String(student.nationalCode || '').trim();
+        if (!nationalCode) {
+            return { status: 'error', message: 'کد ملی خالی' };
+        }
+
+        const file = photoMap[nationalCode];
+        if (!file) {
+            return { status: 'no_file', message: 'عکس پیدا نشد' };
+        }
+
+        try {
+            const base64 = await fileToBase64(file);
+            if (!base64) {
+                return { status: 'error', message: 'خطا در خواندن فایل' };
+            }
+
+            const payload = {
+                Extension: getExtension(file.name),
+                Photo: base64,
+                StudentId: parseInt(nationalCode)
+            };
+
+            const response = await fetch(UPLOAD_URL, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Authorization': 'Bearer ' + getToken(),
+                    'client-id': getClientId(),
+                    'X-XSRF-TOKEN': getXsrfToken()
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                return { status: 'error', message: `HTTP ${response.status}` };
+            }
+
+            const json = await response.json();
+
+            if (json.resultCode === 0) {
+                return {
+                    status: 'success',
+                    path: json.data,
+                    size: base64.length
+                };
+            } else {
+                return {
+                    status: 'error',
+                    message: json.message || `resultCode: ${json.resultCode}`
+                };
+            }
+
+        } catch (e) {
+            return { status: 'error', message: e.message };
+        }
+    }
+
+    // ==================== فاز ۴: پردازش دسته‌ای ====================
+    async function processAll() {
+        if (!reportData.startTime) reportData.startTime = Date.now();
+
+        while (currentIndex < pendingStudents.length && isRunning && !isPaused && !isStopped) {
+            const student = pendingStudents[currentIndex];
+            const studentName = `${student.firstName || ''} ${student.lastName || ''}`.trim();
+
+            setStatus(`(${currentIndex + 1}/${pendingStudents.length}) ${studentName}`);
+            updateCurrentStudent(studentName, student.nationalCode);
+
+            const result = await uploadPhoto(student);
+
+            if (isStopped) break;
+
+            if (result.status === 'success') {
+                totalProcessed++;
+                reportData.success.push({
+                    name: studentName,
+                    code: student.nationalCode,
+                    path: result.path || '',
+                    photoUrl: buildPhotoUrl(result.path),
+                    size: result.size || 0,
+                    time: new Date().toISOString()
+                });
+                updateStats();
+                saveProgress();
+            } else if (result.status === 'no_file') {
+                totalSkipped++;
+                reportData.noFile.push({
+                    name: studentName,
+                    code: student.nationalCode,
+                    time: new Date().toISOString()
+                });
+                updateStats();
+                saveProgress();
+            } else {
+                totalFailed++;
+                reportData.failed.push({
+                    name: studentName,
+                    code: student.nationalCode,
+                    error: result.message,
+                    time: new Date().toISOString()
+                });
+                errorDetails.push({
+                    name: studentName,
+                    code: student.nationalCode,
+                    error: result.message
+                });
+                updateStats();
+                saveProgress();
+            }
+
+            const btnShowReport = document.getElementById('btnShowReport');
+            if (btnShowReport && (reportData.success.length + reportData.failed.length + reportData.noFile.length) > 0) {
+                btnShowReport.style.display = 'block';
+            }
+
+            currentIndex++;
+            await sleep(50);
+        }
+
+        if (currentIndex >= pendingStudents.length) {
+            onComplete();
+        }
+    }
+
+    function onComplete() {
+        isRunning = false;
+        reportData.endTime = Date.now();
+        updatePanelButtons();
+        setStatus(`✅ پایان کار`);
+        showNotification(
+            `🎉 پایان! موفق: ${totalProcessed} | بدون فایل: ${totalSkipped} | خطا: ${totalFailed}`,
+            0
+        );
+        clearProgress();
+
+        const btnShowReport = document.getElementById('btnShowReport');
+        if (btnShowReport) btnShowReport.style.display = 'block';
+
+        showReportPanel();
+    }
+
+    // ==================== UI ====================
+    function setStatus(text) {
+        const el = document.getElementById('uploadStatus');
+        if (el) el.textContent = text;
+    }
+
+    function updateCurrentStudent(name, code) {
+        const el = document.getElementById('currentStudent');
+        if (el) el.textContent = `${name} (${code})`;
+    }
+
+    function updateStats() {
+        const p = document.getElementById('processedStudents');
+        const s = document.getElementById('skippedStudents');
+        const f = document.getElementById('failedStudents');
+        const t = document.getElementById('totalStudents');
+        if (p) p.textContent = totalProcessed;
+        if (s) s.textContent = totalSkipped;
+        if (f) f.textContent = totalFailed;
+        if (t) t.textContent = pendingStudents.length;
+    }
+
+    function updatePanelButtons() {
+        const btnStart = document.getElementById('btnStart');
+        const btnPause = document.getElementById('btnPause');
+        const btnStop = document.getElementById('btnStop');
+        const btnReset = document.getElementById('btnReset');
+
+        if (btnStart) {
+            btnStart.disabled = isRunning;
+            btnStart.style.opacity = isRunning ? '0.5' : '';
+            btnStart.textContent = isPaused ? '▶️ ادامه' :
+                                   isRunning ? '⏳ در حال اجرا...' :
+                                   '📁 انتخاب پوشه و شروع';
+        }
+        if (btnPause) {
+            btnPause.style.display = isRunning ? 'inline-block' : 'none';
+            btnPause.textContent = isPaused ? '▶️ ادامه' : '⏸️ مکث';
+        }
+        if (btnStop) {
+            btnStop.disabled = !isRunning;
+            btnStop.style.opacity = !isRunning ? '0.5' : '';
+        }
+        if (btnReset) {
+            btnReset.disabled = isRunning;
+            btnReset.style.opacity = isRunning ? '0.5' : '';
+        }
+    }
+
+    // ==================== شروع ====================
+    async function startUpload() {
+        if (isRunning) {
+            if (isPaused) {
+                isPaused = false;
+                updatePanelButtons();
+                showNotification('▶️ ادامه...');
+                await processAll();
+            }
             return;
         }
 
-        cleanupAllPanels();
+        // ✅ ریست گزارش برای شروع جدید
+        reportData = {
+            success: [],
+            failed: [],
+            noFile: [],
+            startTime: null,
+            endTime: null
+        };
 
-        if (document.getElementById('uploadPanel')) {
-            document.getElementById('uploadPanel').remove();
-        }
+        const btnShowReport = document.getElementById('btnShowReport');
+        if (btnShowReport) btnShowReport.style.display = 'none';
 
-        let isRunning = false;
-        let isPaused = false;
-        let isStopped = false;
-        let photoFiles = [];
-        let currentPageStudents = [];
-        let currentIndex = 0;
-        let totalProcessed = 0;
-        let totalSkipped = 0;
-        let currentPage = 1;
-        let isProcessingPage = false;
-
-        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-        function showNotification(text, duration) {
-            duration = duration || 5000;
-            let old = document.getElementById('uploadNotif');
-            if (old) old.remove();
-            let notif = document.createElement('div');
-            notif.id = 'uploadNotif';
-            notif.style.cssText = 'position:fixed;bottom:20px;left:20px;background:#1a1a2e;color:white;padding:12px 20px;border-radius:8px;z-index:9999999;font-family:Tahoma,sans-serif;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:350px;direction:rtl;';
-            notif.textContent = text;
-            notif.addEventListener('click', () => notif.remove());
-            document.body.appendChild(notif);
-            if (duration !== 0) {
-                setTimeout(() => { if (notif.parentNode) notif.remove(); }, duration);
-            }
-        }
-
-        function findNextPageButton() {
-            let spanElements = document.querySelectorAll('span.k-icon.k-i-arrow-e');
-            if (spanElements.length > 0) {
-                let btn = spanElements[0];
-                if (!btn.closest('.k-state-disabled')) return btn;
-            }
-            let allElements = document.querySelectorAll('span, a, button, div');
-            for (let el of allElements) {
-                if (el.textContent && el.textContent.trim() === 'بعدی') {
-                    if (!el.closest('.k-state-disabled')) return el;
-                }
-            }
-            let buttons = document.querySelectorAll('button, a, span');
-            for (let btn of buttons) {
-                let ariaLabel = btn.getAttribute('aria-label') || '';
-                let title = btn.getAttribute('title') || '';
-                if ((ariaLabel.includes('بعدی') || title.includes('بعدی')) && !btn.closest('.k-state-disabled')) return btn;
-            }
-            return null;
-        }
-
-        function hasNextPage() {
-            let nextBtn = findNextPageButton();
-            if (nextBtn) {
-                let isDisabled = nextBtn.closest('.k-state-disabled') || nextBtn.hasAttribute('disabled') || nextBtn.classList.contains('disabled');
-                return !isDisabled;
-            }
-            return false;
-        }
-
-        async function goToNextPage() {
-            let nextBtn = findNextPageButton();
-            if (!nextBtn) return false;
-            nextBtn.click();
-            await sleep(4000);
-            currentPage++;
-            return true;
-        }
-
-        function findStudentsWithoutPhotoInPage() {
-            let rows = document.querySelectorAll('tbody tr');
-            let students = [];
-            rows.forEach(function(row, i) {
-                let cells = row.querySelectorAll('td');
-                if (cells.length < 4) return;
-                let img = cells[1] ? cells[1].querySelector('img') : null;
-                let hasPhoto = img && !img.src.includes('thumb_default.jpg');
-                if (!hasPhoto) {
-                    let nationalCode = cells[2] ? cells[2].innerText.trim().replace(/[^0-9]/g, '') : '';
-                    let editBtn = cells[cells.length - 1] ? cells[cells.length - 1].querySelector('button, a') : null;
-                    if (editBtn && nationalCode && nationalCode.length > 0) {
-                        students.push({
-                            code: nationalCode,
-                            name: cells[3] ? cells[3].innerText.trim() : '',
-                            family: cells[4] ? cells[4].innerText.trim() : '',
-                            btn: editBtn
-                        });
-                    }
-                }
-            });
-            return students;
-        }
-
-        function findEditButtonByCode(codemelli) {
-            let rows = document.querySelectorAll('tbody tr');
-            for (let row of rows) {
-                let cells = row.querySelectorAll('td');
-                if (cells.length < 4) continue;
-                let nationalCode = cells[2] ? cells[2].innerText.trim().replace(/[^0-9]/g, '') : '';
-                if (nationalCode === codemelli) {
-                    let editBtn = cells[cells.length - 1] ? cells[cells.length - 1].querySelector('button, a') : null;
-                    if (editBtn) return editBtn;
-                }
-            }
-            return null;
-        }
-
-        function selectPhotoFolder() {
-            return new Promise(function(resolve) {
-                let input = document.createElement('input');
-                input.type = 'file';
-                input.webkitdirectory = true;
-                input.multiple = true;
-                input.accept = 'image/*';
-                input.style.cssText = 'position:fixed;top:-100px;left:0;opacity:0;pointer-events:none;display:block;';
-                document.body.appendChild(input);
-
-                let done = false;
-                const finish = (result) => {
-                    if (done) return;
-                    done = true;
-                    window.removeEventListener('focus', onFocus);
-                    setTimeout(() => { try { input.remove(); } catch (e) {} }, 100);
-                    resolve(result);
-                };
-
-                const onFocus = () => {
-                    setTimeout(() => finish([]), 1500);
-                };
-
-                input.onchange = function(e) {
-                    let files = Array.from(e.target.files || []);
-                    let images = files.filter(function(f) { return f.type.startsWith('image/'); });
-                    console.log('📸 تعداد تصاویر:', images.length);
-                    photoFiles = images;
-                    finish(images);
-                };
-
-                input.addEventListener('cancel', () => finish([]));
-                input.click();
-                window.addEventListener('focus', onFocus);
-            });
-        }
-
-        function findPhotoFile(codemelli) {
-            if (!photoFiles || photoFiles.length === 0) return null;
-            for (let file of photoFiles) {
-                let name = file.name.toLowerCase();
-                if (name.includes(codemelli)) return file;
-                let cleanName = name.replace(/[^0-9]/g, '');
-                if (cleanName.includes(codemelli)) return file;
-            }
-            return null;
-        }
-
-        async function closeModal() {
-            try {
-                let closeBtn = Array.from(document.querySelectorAll('button, a, span'))
-                    .find(function(el) {
-                        var text = el.textContent ? el.textContent.trim() : '';
-                        return text === 'انصراف' || text.includes('لغو') || text.includes('بستن') || text.includes('Close') || text.includes('Cancel');
-                    });
-                if (closeBtn) { closeBtn.click(); await sleep(1500); return true; }
-                let closeX = document.querySelector('.modal-close, .close, [data-dismiss="modal"]');
-                if (closeX) { closeX.click(); await sleep(1500); return true; }
-                let backdrop = document.querySelector('.modal-backdrop, .modal-overlay');
-                if (backdrop) { backdrop.click(); await sleep(1500); return true; }
-                return false;
-            } catch (err) {
-                console.error('خطا در بستن مودال:', err);
-                return false;
-            }
-        }
-
-        async function uploadPhotoForStudent(student) {
-            var modalClosed = false;
-            try {
-                var editBtn = student.btn;
-                if (!document.contains(editBtn)) {
-                    editBtn = findEditButtonByCode(student.code);
-                    if (!editBtn) {
-                        showNotification('❌ دکمه ویرایش برای کد ملی ' + student.code + ' پیدا نشد');
-                        return false;
-                    }
-                    student.btn = editBtn;
-                }
-                editBtn.click();
-                await sleep(3000);
-
-                               var editPhotoBtn = null;
-                var buttons = document.querySelectorAll('button, a, span');
-                for (let btn of buttons) {
-                    let text = btn.textContent ? btn.textContent.trim() : '';
-                    if (text.includes('ویرایش عکس') || text.includes('تغییر عکس') || text.includes('آپلود عکس') || text.includes('انتخاب عکس')) {
-                        editPhotoBtn = btn;
-                        break;
-                    }
-                }
-                if (editPhotoBtn) {
-                    editPhotoBtn.click();
-                    await sleep(2000);
-                }
-
-                var photoFile = findPhotoFile(student.code);
-                if (!photoFile) {
-                    console.log('⚠️ عکس برای کد ملی ' + student.code + ' پیدا نشد');
-                    await closeModal();
-                    modalClosed = true;
-                    return false;
-                }
-
-                var fileInput = document.querySelector('input[type="file"][accept*="image"]') || document.querySelector('input[type="file"]');
-                if (!fileInput) {
-                    showNotification('❌ فیلد آپلود عکس پیدا نشد');
-                    await closeModal();
-                    modalClosed = true;
-                    return false;
-                }
-
-                var dataTransfer = new DataTransfer();
-                dataTransfer.items.add(photoFile);
-                fileInput.files = dataTransfer.files;
-                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-                fileInput.dispatchEvent(new Event('input', { bubbles: true }));
-                await sleep(3000);
-
-                                var confirmBtn = null;
-                var allButtons = document.querySelectorAll('button, span, a');
-                for (let btn of allButtons) {
-                    let text = btn.textContent ? btn.textContent.trim() : '';
-                    if (text.includes('اعتبار سنجی و تایید') || text.includes('اعتبارسنجی') || text.includes('تایید') || text.includes('ذخیره') || text.includes('ثبت')) {
-                        confirmBtn = btn;
-                        break;
-                    }
-                }
-                if (confirmBtn) {
-                    confirmBtn.click();
-                    await sleep(4000);
-                } else {
-                    showNotification('⚠️ دکمه تایید پیدا نشد');
-                    await closeModal();
-                    modalClosed = true;
-                    return false;
-                }
-                await sleep(2000);
-                await closeModal();
-                modalClosed = true;
-                await sleep(2000);
-                return true;
-            } catch (err) {
-                console.error('خطا:', err);
-                if (!modalClosed) await closeModal();
-                return false;
-            }
-        }
-
-        async function processCurrentPage() {
-            if (!isRunning || isPaused || isStopped) return;
-
-            currentPageStudents = findStudentsWithoutPhotoInPage();
-            if (currentPageStudents.length === 0) {
-                showNotification('📄 صفحه ' + currentPage + ': همه عکس دارند.');
-                if (hasNextPage()) {
-                    await goToNextPage();
-                    if (isRunning && !isPaused && !isStopped) await processCurrentPage();
-                } else {
-                    isRunning = false;
-                    isProcessingPage = false;
-                    updatePanelButtons();
-                    setStatus('✅ پردازش کامل شد!');
-                    showNotification('🎉 ' + totalProcessed + ' آپلود شد | ' + totalSkipped + ' صرف‌نظر شد');
-                }
+        if (photoFiles.length === 0) {
+            showNotification('📁 لطفاً پوشه حاوی عکس‌ها را انتخاب کنید...');
+            const files = await selectPhotoFolder();
+            if (files.length === 0) {
+                showNotification('❌ هیچ عکسی انتخاب نشد');
                 return;
             }
+            photoFiles = files;
+            showNotification(`✅ ${files.length} عکس بارگذاری شد`);
+        }
 
-            currentIndex = 0;
-            while (currentIndex < currentPageStudents.length && isRunning && !isPaused && !isStopped) {
-                var student = currentPageStudents[currentIndex];
-                setStatus('⏳ صفحه ' + currentPage + ' - ' + (currentIndex + 1) + '/' + currentPageStudents.length);
-                var el = document.getElementById('currentStudent');
-                if (el) el.textContent = 'صفحه ' + currentPage + ': ' + student.name + ' ' + student.family + ' (' + student.code + ')';
+        if (Object.keys(photoMap).length === 0) {
+            setStatus('در حال ساخت نقشهٔ عکس‌ها...');
+            const result = buildPhotoMap(photoFiles);
+            photoMap = result.map;
+            if (result.duplicates.length > 0) {
+                console.warn('⚠️ کدهای تکراری:', result.duplicates);
+                showNotification(`⚠️ ${result.duplicates.length} کد تکراری در پوشه`, 6000);
+            }
+            showNotification(`✅ ${Object.keys(photoMap).length} کد یکتا آماده است`);
+        }
 
-                var success = await uploadPhotoForStudent(student);
+        setStatus('در حال دریافت لیست دانش‌آموزان...');
+        isRunning = true;
+        updatePanelButtons();
 
-                if (isStopped || !isRunning) break;
+        try {
+            allStudents = await fetchAllStudents();
+        } catch (e) {
+            showNotification('❌ خطا در دریافت لیست: ' + e.message);
+            isRunning = false;
+            updatePanelButtons();
+            return;
+        }
 
-                if (success) {
-                    totalProcessed++;
-                    showNotification('✅ ' + student.name + ' ' + student.family + ' آپلود شد.');
-                } else {
-                    var photoFile = findPhotoFile(student.code);
-                    if (!photoFile) {
-                        totalSkipped++;
-                        showNotification('⏭️ ' + student.name + ' ' + student.family + ' - عکس پیدا نشد', 3000);
-                    } else {
-                        showNotification('⚠️ خطا در آپلود ' + student.name + ' ' + student.family);
-                    }
-                }
-                document.getElementById('processedStudents').textContent = totalProcessed;
-                document.getElementById('skippedStudents').textContent = totalSkipped;
-                currentIndex++;
-                await sleep(2000);
+        if (!isRunning) return;
+
+        if (allStudents.length === 0) {
+            showNotification('❌ هیچ دانش‌آموزی دریافت نشد');
+            isRunning = false;
+            updatePanelButtons();
+            return;
+        }
+
+        const withoutPhoto = allStudents.filter(s => !hasPhoto(s));
+        pendingStudents = withoutPhoto.filter(s => photoMap[String(s.nationalCode || '').trim()]);
+
+        const missingFiles = withoutPhoto.filter(s => !photoMap[String(s.nationalCode || '').trim()]);
+
+        showNotification(
+            `📊 بدون عکس: ${withoutPhoto.length} | با فایل: ${pendingStudents.length} | بدون فایل: ${missingFiles.length}`,
+            8000
+        );
+
+        // ✅ رفع باگ: تفکیک سه حالت
+        if (pendingStudents.length === 0) {
+            // حالت A: همه دانش‌آموزان سیدا عکس دارند
+            if (withoutPhoto.length === 0) {
+                setStatus('✅ همه عکس‌ها موجودند');
+                showNotification('✅ همهٔ دانش‌آموزان عکس دارند — نیازی به آپلود نیست', 0);
+            }
+            // حالت B: دانش‌آموز بدون عکس هست، اما فایلی در پوشه نیست
+            else if (missingFiles.length > 0) {
+                setStatus(`⚠️ ${missingFiles.length} نفر بدون عکس، اما فایلشون تو پوشه نیست`);
+                showNotification(
+                    `⚠️ ${withoutPhoto.length} دانش‌آموز بدون عکس در سیدا هستن\n` +
+                    `❌ اما هیچ‌کدوم تو پوشهٔ انتخاب‌شده فایل عکس ندارن\n\n` +
+                    `💡 مطمئن شو نام فایل عکس‌ها دقیقاً همون کد ملی ۱۰ رقمی باشه`,
+                    12000
+                );
+            }
+            // حالت C: قبلاً همه آپلود شدن (fallback)
+            else {
+                setStatus('✅ کار قبلاً تمام شده');
+                showNotification('✅ همهٔ دانش‌آموزان بدون عکس، قبلاً آپلود شدن', 0);
             }
 
-            if (isStopped) {
-                isRunning = false;
-                isProcessingPage = false;
-                updatePanelButtons();
-                setStatus('⛔ متوقف شد');
-                return;
-            }
-            if (!isRunning || isPaused) return;
+            isRunning = false;
+            updatePanelButtons();
+            return;
+        }
 
-            if (hasNextPage()) {
-                await goToNextPage();
-                if (isRunning && !isPaused && !isStopped) await processCurrentPage();
+        const progress = loadProgress();
+        if (progress && progress.currentIndex > 0 && progress.currentIndex < pendingStudents.length) {
+            if (confirm(`🔄 ادامه از ${progress.currentIndex + 1}؟\n\n(قبلاً تا ${progress.currentIndex} رفته بودید)`)) {
+                currentIndex = progress.currentIndex;
+                totalProcessed = progress.totalProcessed || 0;
+                totalSkipped = progress.totalSkipped || 0;
+                totalFailed = progress.totalFailed || 0;
+                errorDetails = progress.errorDetails || [];
             } else {
-                isRunning = false;
-                isProcessingPage = false;
-                updatePanelButtons();
-                setStatus('✅ پردازش کامل شد!');
-                showNotification('🎉 ' + totalProcessed + ' آپلود شد | ' + totalSkipped + ' صرف‌نظر شد');
+                currentIndex = 0;
+                totalProcessed = 0;
+                totalSkipped = 0;
+                totalFailed = 0;
+                errorDetails = [];
             }
-        }
-
-        async function startUpload() {
-            if (isRunning) {
-                if (isPaused) {
-                    isPaused = false;
-                    isStopped = false;
-                    document.getElementById('btnPause').textContent = '⏸️ مکث';
-                    showNotification('▶️ ادامه...');
-                    if (isProcessingPage) await processCurrentPage();
-                }
-                return;
-            }
-            if (photoFiles.length === 0) {
-                showNotification('📁 لطفاً پوشه حاوی عکس‌ها را انتخاب کنید...');
-                await selectPhotoFolder();
-                if (photoFiles.length === 0) {
-                    alert('هیچ عکسی انتخاب نشد!');
-                    return;
-                }
-                showNotification('✅ ' + photoFiles.length + ' عکس بارگذاری شد.');
-            }
-            isRunning = true;
-            isPaused = false;
-            isStopped = false;
-            isProcessingPage = true;
-            currentPage = 1;
-            totalProcessed = 0;
-            totalSkipped = 0;
-            document.getElementById('totalStudents').textContent = '...';
-            document.getElementById('processedStudents').textContent = '0';
-            document.getElementById('skippedStudents').textContent = '0';
-            updatePanelButtons();
-            setStatus('⏳ در حال پردازش...');
-            await processCurrentPage();
-        }
-
-        function togglePause() {
-            if (!isRunning) return;
-            isPaused = !isPaused;
-            document.getElementById('btnPause').textContent = isPaused ? '▶️ ادامه' : '⏸️ مکث';
-            setStatus(isPaused ? '⏸️ متوقف شد' : '▶️ در حال پردازش...');
-            if (!isPaused && isProcessingPage && !isStopped) processCurrentPage();
-        }
-
-        function stopUpload() {
-            isStopped = true;
-            isRunning = false;
-            isPaused = false;
-            isProcessingPage = false;
-            updatePanelButtons();
-            setStatus('⛔ متوقف شد');
-            showNotification('⛔ پردازش متوقف شد.');
-        }
-
-        function resetAll() {
-            if (isRunning && !confirm('آیا مطمئن هستید؟')) return;
-            isRunning = false;
-            isPaused = false;
-            isStopped = false;
-            isProcessingPage = false;
-            photoFiles = [];
-            currentPageStudents = [];
+        } else {
             currentIndex = 0;
             totalProcessed = 0;
             totalSkipped = 0;
-            currentPage = 1;
-            document.getElementById('totalStudents').textContent = '0';
-            document.getElementById('processedStudents').textContent = '0';
-            document.getElementById('skippedStudents').textContent = '0';
-            document.getElementById('currentStudent').textContent = '---';
-            updatePanelButtons();
-            setStatus('🔄 ریست شد');
+            totalFailed = 0;
+            errorDetails = [];
         }
 
-        function updatePanelButtons() {
-            document.getElementById('btnStart').disabled = isRunning;
-            document.getElementById('btnStart').style.opacity = isRunning ? '0.5' : '';
-            document.getElementById('btnPause').style.display = isRunning ? 'inline-block' : 'none';
-            document.getElementById('btnPause').textContent = '⏸️ مکث';
-            document.getElementById('btnStop').disabled = !isRunning;
-            document.getElementById('btnStop').style.opacity = !isRunning ? '0.5' : '';
-        }
+        updateStats();
+        setStatus('⏳ در حال آپلود...');
 
-        function setStatus(text) {
-            document.getElementById('uploadStatus').textContent = text;
-        }
-
-        function createPanel() {
-            var panel = document.createElement('div');
-            panel.id = 'uploadPanel';
-            panel.style.cssText = 'position:fixed;top:20px;left:20px;background:#1a1a2e;border:2px solid #3ecfe0;border-radius:12px;padding:16px 18px;width:340px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:Tahoma,sans-serif;direction:rtl;font-size:13px;color:#e8e8f0;';
-            panel.innerHTML = '<div id="uploadHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #3ecfe0;user-select:none;cursor:move;"><strong style="color:#3ecfe0;font-size:15px;">📸 آپلود خودکار عکس</strong><button id="btnClose" style="background:none;border:none;cursor:pointer;font-size:18px;color:#999;">✕</button></div><div style="background:#0f1117;padding:12px;border-radius:8px;margin-bottom:12px;text-align:center;"><div style="font-size:12px;color:#888899;">وضعیت:</div><div id="uploadStatus" style="font-size:14px;color:#3ecfe0;margin-top:4px;">آماده شروع</div><div style="display:flex;justify-content:space-around;margin-top:10px;"><div><div style="font-size:10px;color:#888899;">کل بدون عکس</div><div id="totalStudents" style="font-size:20px;font-weight:bold;color:#3ecf8e;">0</div></div><div><div style="font-size:10px;color:#888899;">آپلود شده</div><div id="processedStudents" style="font-size:20px;font-weight:bold;color:#f59e0b;">0</div></div><div><div style="font-size:10px;color:#888899;">صرف‌نظر</div><div id="skippedStudents" style="font-size:20px;font-weight:bold;color:#ff6b81;">0</div></div></div><div id="currentStudent" style="font-size:11px;color:#888899;margin-top:8px;">---</div></div><div style="display:flex;flex-direction:column;gap:8px;"><button id="btnStart" style="background:#3b82f6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">📁 انتخاب پوشه و شروع</button><div style="display:flex;gap:8px;"><button id="btnPause" style="display:none;flex:1;background:#f59e0b;color:#0f1117;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">⏸️ مکث</button><button id="btnStop" style="flex:1;background:#ef4444;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;">⛔ توقف</button></div><button id="btnReset" style="background:transparent;color:#888899;border:1px solid #2a2d42;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;margin-top:5px;">🔄 ریست</button></div><div style="margin-top:10px;font-size:11px;color:#555577;text-align:center;border-top:1px solid #2a2d42;padding-top:8px;">⚠️ هنگام اجرا، تب مرورگر را فعال نگه دارید.</div>';
-            document.body.appendChild(panel);
-
-            var header = document.getElementById('uploadHeader');
-            var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-            header.onmousedown = function(e) {
-                e.preventDefault();
-                pos3 = e.clientX; pos4 = e.clientY;
-                document.onmouseup = () => { document.onmouseup = null; document.onmousemove = null; };
-                document.onmousemove = function(e) {
-                    e.preventDefault();
-                    pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
-                    pos3 = e.clientX; pos4 = e.clientY;
-                    panel.style.top = (panel.offsetTop - pos2) + 'px';
-                    panel.style.left = (panel.offsetLeft - pos1) + 'px';
-                };
-            };
-
-            document.getElementById('btnClose').onclick = () => { panel.remove(); };
-            document.getElementById('btnStart').onclick = startUpload;
-            document.getElementById('btnPause').onclick = togglePause;
-            document.getElementById('btnStop').onclick = stopUpload;
-            document.getElementById('btnReset').onclick = resetAll;
-
-            setInterval(() => {
-                if (currentPageStudents.length > 0) {
-                    document.getElementById('totalStudents').textContent = currentPageStudents.length;
-                }
-                document.getElementById('processedStudents').textContent = totalProcessed;
-                document.getElementById('skippedStudents').textContent = totalSkipped;
-            }, 1000);
-        }
-
-        createPanel();
+        await processAll();
     }
 
+    // ==================== کنترل‌ها ====================
+    function togglePause() {
+        if (!isRunning) return;
+        isPaused = !isPaused;
+        updatePanelButtons();
+        setStatus(isPaused ? '⏸️ متوقف موقت' : '⏳ در حال آپلود...');
+        if (!isPaused) {
+            processAll();
+        }
+    }
+
+    function stopUpload() {
+        isStopped = true;
+        isRunning = false;
+        isPaused = false;
+        saveProgress();
+        updatePanelButtons();
+        setStatus(`⛔ متوقف شد (تا نفر ${currentIndex})`);
+        showNotification('⛔ متوقف شد — پیشرفت ذخیره شد', 6000);
+
+        const btnShowReport = document.getElementById('btnShowReport');
+        if (btnShowReport && (reportData.success.length + reportData.failed.length + reportData.noFile.length) > 0) {
+            btnShowReport.style.display = 'block';
+        }
+    }
+
+    function resetAll() {
+        if (isRunning && !confirm('آیا مطمئن هستید؟')) return;
+        isRunning = false;
+        isPaused = false;
+        isStopped = false;
+        photoFiles = [];
+        photoMap = {};
+        allStudents = [];
+        pendingStudents = [];
+        currentIndex = 0;
+        totalProcessed = 0;
+        totalSkipped = 0;
+        totalFailed = 0;
+        errorDetails = [];
+        reportData = {
+            success: [],
+            failed: [],
+            noFile: [],
+            startTime: null,
+            endTime: null
+        };
+        clearProgress();
+        updateStats();
+        updateCurrentStudent('---', '');
+        updatePanelButtons();
+        setStatus('🔄 ریست شد');
+
+        const btnShowReport = document.getElementById('btnShowReport');
+        if (btnShowReport) btnShowReport.style.display = 'none';
+    }
+
+    // ==================== راهنمای پنل ====================
+    function showHelpOverlay() {
+        const existing = document.getElementById('uploadHelpOverlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'uploadHelpOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:99999999;display:flex;align-items:center;justify-content:center;font-family:Tahoma,sans-serif;direction:rtl;padding:20px;box-sizing:border-box;';
+
+        overlay.innerHTML = `
+            <div style="background:#1a1d2e;color:#e8e8f0;border:2px solid #3ecfe0;border-radius:12px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto;padding:25px;box-shadow:0 10px 40px rgba(0,0,0,0.5);font-size:16px;line-height:2;position:relative;">
+                <button id="uploadHelpClose" style="position:absolute;top:12px;left:12px;background:#ef4444;color:white;border:none;width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:20px;font-weight:bold;">✕</button>
+
+                <h2 style="color:#3ecfe0;text-align:center;margin-bottom:20px;font-size:22px;border-bottom:3px solid #3ecfe0;padding-bottom:12px;">📖 راهنمای آپلود خودکار عکس</h2>
+
+                <div style="background:#0f1117;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #3b82f6;">
+                    <h3 style="color:#3b82f6;margin-bottom:10px;font-size:18px;">📁 مرحله ۱: آماده‌سازی پوشه</h3>
+                    <ul style="margin-right:20px;margin-top:8px;">
+                        <li>تمام عکس‌ها رو تو یه پوشه بذار</li>
+                        <li>نام فایل هر عکس باید <b style="color:#3ecfe0;">کد ملی ۱۰ رقمی</b> دانش‌آموز باشه</li>
+                        <li>مثال: <span style="font-family:monospace;color:#f59e0b;">1367260884.jpg</span></li>
+                        <li>فرمت: فقط <b>JPG</b> یا <b>JPEG</b></li>
+                    </ul>
+                </div>
+
+                <div style="background:#0f1117;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #10b981;">
+                    <h3 style="color:#10b981;margin-bottom:10px;font-size:18px;">▶️ مرحله ۲: شروع آپلود</h3>
+                    <ul style="margin-right:20px;margin-top:8px;">
+                        <li>دکمهٔ <b>«📁 انتخاب پوشه و شروع»</b> رو بزن</li>
+                        <li>پوشهٔ حاوی عکس‌ها رو انتخاب کن</li>
+                        <li>سیستم خودکار تشخیص می‌ده کدوم دانش‌آموز عکس نداره</li>
+                        <li>و فقط برای اون‌ها آپلود می‌کنه</li>
+                    </ul>
+                </div>
+
+                <div style="background:#0f1117;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #f59e0b;">
+                    <h3 style="color:#f59e0b;margin-bottom:10px;font-size:18px;">⏸️ کنترل‌ها</h3>
+                    <ul style="margin-right:20px;margin-top:8px;">
+                        <li><b>⏸️ مکث:</b> موقتاً متوقف می‌کنه</li>
+                        <li><b>⛔ توقف:</b> کاملاً متوقف می‌کنه (پیشرفت ذخیره می‌شه)</li>
+                        <li><b>🔄 ریست:</b> همه چیز رو پاک می‌کنه</li>
+                    </ul>
+                </div>
+
+                <div style="background:#0f1117;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #8b5cf6;">
+                    <h3 style="color:#8b5cf6;margin-bottom:10px;font-size:18px;">📊 مرحله ۳: گزارش</h3>
+                    <ul style="margin-right:20px;margin-top:8px;">
+                        <li>در پایان، گزارش کامل نمایش داده می‌شه</li>
+                        <li>می‌تونی هر لحظه دکمهٔ <b>«📊 مشاهده گزارش»</b> رو بزنی</li>
+                        <li>خروجی‌ها: <b>Word</b>، <b>Excel</b>، <b>کپی متن</b></li>
+                        <li>لینک عکس هر دانش‌آموز تو گزارش هست</li>
+                    </ul>
+                </div>
+
+                <div style="background:#fef3c7;color:#92400e;padding:14px;border-radius:8px;border-right:4px solid #f59e0b;">
+                    <h3 style="margin-bottom:10px;font-size:18px;">💡 نکات مهم</h3>
+                    <ul style="margin-right:20px;">
+                        <li>اگه وسط کار قطع شد، دوباره بزن — از همون‌جا ادامه می‌ده</li>
+                        <li>اگه دو فایل با یه کد ملی بود، هشدار می‌ده</li>
+                        <li>تب مرورگر رو فعال نگه دار</li>
+                    </ul>
+                </div>
+
+                <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:2px dashed #2a2d42;color:#3ecfe0;font-weight:bold;font-size:18px;">
+                    🎨 طراح: یوسف معصومی
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        document.getElementById('uploadHelpClose').onclick = () => overlay.remove();
+        overlay.onclick = (e) => {
+            if (e.target === overlay) overlay.remove();
+        };
+    }
+
+    // ==================== گزارش نهایی ====================
+    function showReportPanel() {
+        if (reportData.success.length + reportData.failed.length + reportData.noFile.length === 0) {
+            alert('⚠️ هنوز هیچ داده‌ای برای گزارش وجود ندارد.\n\nلطفاً ابتدا آپلود را شروع کنید.');
+            return;
+        }
+
+        const existingOverlay = document.getElementById('uploadReportOverlay');
+        if (existingOverlay) existingOverlay.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'uploadReportOverlay';
+        overlay.style.cssText = `
+            position:fixed;top:0;left:0;width:100vw;height:100vh;
+            background:rgba(0,0,0,0.85);z-index:9999999;
+            display:flex;align-items:center;justify-content:center;
+            font-family:Tahoma,sans-serif;direction:rtl;padding:20px;
+            box-sizing:border-box;
+        `;
+
+        function buildSuccessRows() {
+            if (reportData.success.length === 0) {
+                return '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px;font-size:15px;">هیچ موفقیتی ثبت نشده</td></tr>';
+            }
+            return reportData.success.map((s, i) => {
+                const photoUrl = s.photoUrl || buildPhotoUrl(s.path);
+                const linkHtml = photoUrl
+                    ? `<a href="${escapeHtml(photoUrl)}" target="_blank" rel="noopener" style="color:#3ecfe0;text-decoration:none;font-family:monospace;font-size:13px;direction:ltr;display:inline-block;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(photoUrl)}">🔗 مشاهده عکس</a>`
+                    : '<span style="color:#888;font-size:13px;">بدون مسیر</span>';
+                return `
+                    <tr style="border-bottom:1px solid #1a1d2e;">
+                        <td style="padding:10px;text-align:center;color:#888;font-size:14px;">${i + 1}</td>
+                        <td style="padding:10px;font-size:14px;">${escapeHtml(s.name)}</td>
+                        <td style="padding:10px;text-align:center;direction:ltr;font-family:monospace;font-size:14px;">${escapeHtml(s.code)}</td>
+                        <td style="padding:10px;text-align:center;">${linkHtml}</td>
+                        <td style="padding:10px;text-align:center;color:#3ecf8e;font-size:15px;">✅</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function buildFailedRows() {
+            if (reportData.failed.length === 0) {
+                return '<tr><td colspan="4" style="text-align:center;color:#888;padding:20px;font-size:15px;">هیچ خطایی ثبت نشده 🎉</td></tr>';
+            }
+            return reportData.failed.map((s, i) => `
+                <tr style="border-bottom:1px solid #1a1d2e;">
+                    <td style="padding:10px;text-align:center;color:#888;font-size:14px;">${i + 1}</td>
+                    <td style="padding:10px;font-size:14px;">${escapeHtml(s.name)}</td>
+                    <td style="padding:10px;text-align:center;direction:ltr;font-family:monospace;font-size:14px;">${escapeHtml(s.code)}</td>
+                    <td style="padding:10px;text-align:center;color:#ff6b81;font-size:13px;">${escapeHtml(s.error)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function buildNoFileRows() {
+            if (reportData.noFile.length === 0) {
+                return '<tr><td colspan="3" style="text-align:center;color:#888;padding:20px;font-size:15px;">همهٔ دانش‌آموزان فایل داشتند</td></tr>';
+            }
+            return reportData.noFile.map((s, i) => `
+                <tr style="border-bottom:1px solid #1a1d2e;">
+                    <td style="padding:10px;text-align:center;color:#888;font-size:14px;">${i + 1}</td>
+                    <td style="padding:10px;font-size:14px;">${escapeHtml(s.name)}</td>
+                    <td style="padding:10px;text-align:center;direction:ltr;font-family:monospace;font-size:14px;">${escapeHtml(s.code)}</td>
+                </tr>
+            `).join('');
+        }
+
+        const durationMs = (reportData.endTime || Date.now()) - (reportData.startTime || Date.now());
+        const durationSec = Math.floor(durationMs / 1000);
+        const durationMin = Math.floor(durationSec / 60);
+        const durationStr = durationMin > 0
+            ? `${durationMin} دقیقه و ${durationSec % 60} ثانیه`
+            : `${durationSec} ثانیه`;
+
+        const total = reportData.success.length + reportData.failed.length + reportData.noFile.length;
+        const successRate = total > 0 ? ((reportData.success.length / total) * 100).toFixed(1) : 0;
+
+        overlay.innerHTML = `
+            <div style="
+                background:#1a1d2e;color:#e8e8f0;border:2px solid #3ecfe0;
+                border-radius:12px;max-width:950px;width:100%;max-height:90vh;
+                display:flex;flex-direction:column;overflow:hidden;
+            ">
+                <div style="
+                    background:#3ecfe0;color:#0f1117;padding:18px 22px;
+                    display:flex;justify-content:space-between;align-items:center;
+                ">
+                    <strong style="font-size:20px;">📊 گزارش نهایی آپلود عکس</strong>
+                    <button id="uploadReportClose" style="
+                        background:rgba(0,0,0,0.2);color:#0f1117;border:none;
+                        width:36px;height:36px;border-radius:50%;cursor:pointer;
+                        font-size:20px;font-weight:bold;
+                    ">✕</button>
+                </div>
+
+                <div style="padding:22px;overflow-y:auto;flex:1;">
+                    <div style="
+                        display:grid;grid-template-columns:repeat(4,1fr);gap:12px;
+                        margin-bottom:22px;
+                    ">
+                        <div style="background:#0f1117;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:13px;color:#888899;">کل</div>
+                            <div style="font-size:28px;font-weight:bold;color:#3ecfe0;">${total}</div>
+                        </div>
+                        <div style="background:#0f1117;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:13px;color:#888899;">✅ موفق</div>
+                            <div style="font-size:28px;font-weight:bold;color:#3ecf8e;">${reportData.success.length}</div>
+                        </div>
+                        <div style="background:#0f1117;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:13px;color:#888899;">❌ خطا</div>
+                            <div style="font-size:28px;font-weight:bold;color:#ff6b81;">${reportData.failed.length}</div>
+                        </div>
+                        <div style="background:#0f1117;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:13px;color:#888899;">⏭️ بدون فایل</div>
+                            <div style="font-size:28px;font-weight:bold;color:#f59e0b;">${reportData.noFile.length}</div>
+                        </div>
+                    </div>
+
+                    <div style="
+                        background:#0f1117;padding:14px;border-radius:8px;
+                        margin-bottom:22px;font-size:15px;line-height:2;
+                    ">
+                        <div>⏱️ مدت زمان: <b>${durationStr}</b></div>
+                        <div>📈 نرخ موفقیت: <b style="color:#3ecf8e;">${successRate}%</b></div>
+                        <div>📅 تاریخ: <b>${new Date().toLocaleString('fa-IR')}</b></div>
+                    </div>
+
+                    <div style="margin-bottom:22px;">
+                        <h3 style="color:#3ecf8e;margin-bottom:12px;font-size:18px;">
+                            ✅ موفق (${reportData.success.length})
+                        </h3>
+                        <div style="background:#0f1117;border-radius:8px;max-height:280px;overflow-y:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                                <thead style="position:sticky;top:0;background:#1a1d2e;">
+                                    <tr>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">#</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;text-align:right;">نام و فامیل</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">کد ملی</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">لینک عکس</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">وضعیت</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${buildSuccessRows()}</tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:22px;">
+                        <h3 style="color:#ff6b81;margin-bottom:12px;font-size:18px;">
+                            ❌ ناموفق (${reportData.failed.length})
+                        </h3>
+                        <div style="background:#0f1117;border-radius:8px;max-height:280px;overflow-y:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                                <thead style="position:sticky;top:0;background:#1a1d2e;">
+                                    <tr>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">#</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;text-align:right;">نام و فامیل</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">کد ملی</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">خطا</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${buildFailedRows()}</tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 style="color:#f59e0b;margin-bottom:12px;font-size:18px;">
+                            ⏭️ بدون فایل (${reportData.noFile.length})
+                        </h3>
+                        <div style="background:#0f1117;border-radius:8px;max-height:280px;overflow-y:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                                <thead style="position:sticky;top:0;background:#1a1d2e;">
+                                    <tr>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">#</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;text-align:right;">نام و فامیل</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">کد ملی</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${buildNoFileRows()}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="
+                    padding:16px 22px;background:#0f1117;
+                    border-top:1px solid #2a2d42;
+                    display:flex;gap:10px;flex-wrap:wrap;
+                ">
+                    <button id="downloadWordReport" style="
+                        flex:1;background:#10b981;color:white;border:none;
+                        padding:13px;border-radius:8px;cursor:pointer;
+                        font-family:inherit;font-weight:bold;font-size:15px;
+                    ">📄 دانلود Word</button>
+                    <button id="downloadCsvReport" style="
+                        flex:1;background:#217346;color:white;border:none;
+                        padding:13px;border-radius:8px;cursor:pointer;
+                        font-family:inherit;font-weight:bold;font-size:15px;
+                    ">📊 دانلود Excel</button>
+                    <button id="copyReport" style="
+                        flex:1;background:#3b82f6;color:white;border:none;
+                        padding:13px;border-radius:8px;cursor:pointer;
+                        font-family:inherit;font-weight:bold;font-size:15px;
+                    ">📋 کپی متن</button>
+                    <button id="closeReportBtn" style="
+                        flex:1;background:#6b7280;color:white;border:none;
+                        padding:13px;border-radius:8px;cursor:pointer;
+                        font-family:inherit;font-weight:bold;font-size:15px;
+                    ">بستن</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        document.getElementById('uploadReportClose').onclick = () => overlay.remove();
+        document.getElementById('closeReportBtn').onclick = () => overlay.remove();
+        document.getElementById('downloadWordReport').onclick = () => downloadWordReport();
+        document.getElementById('downloadCsvReport').onclick = () => downloadCsvReport();
+        document.getElementById('copyReport').onclick = () => copyReportText();
+    }
+
+    // ==================== دانلود Word ====================
+    function downloadWordReport() {
+        if (reportData.success.length + reportData.failed.length + reportData.noFile.length === 0) {
+            alert('⚠️ داده‌ای برای گزارش وجود ندارد');
+            return;
+        }
+
+        const durationMs = (reportData.endTime || Date.now()) - (reportData.startTime || Date.now());
+        const durationSec = Math.floor(durationMs / 1000);
+        const durationMin = Math.floor(durationSec / 60);
+        const durationStr = durationMin > 0
+            ? `${durationMin} دقیقه و ${durationSec % 60} ثانیه`
+            : `${durationSec} ثانیه`;
+        const total = reportData.success.length + reportData.failed.length + reportData.noFile.length;
+        const successRate = total > 0 ? ((reportData.success.length / total) * 100).toFixed(1) : 0;
+
+        let successRows = '';
+        reportData.success.forEach((s, i) => {
+            const photoUrl = s.photoUrl || buildPhotoUrl(s.path);
+            const linkHtml = photoUrl
+                ? `<a href="${escapeHtml(photoUrl)}" target="_blank" style="color:#0ea5e9;text-decoration:underline;font-family:Courier New;font-size:10pt;">مشاهده عکس</a>`
+                : '-';
+            successRows += `
+                <tr>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;">${i + 1}</td>
+                    <td style="border:1px solid #999;padding:6px;">${escapeHtml(s.name)}</td>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${escapeHtml(s.code)}</td>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;">${linkHtml}</td>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;color:#2e7d32;font-weight:bold;">✅ موفق</td>
+                </tr>
+            `;
+        });
+
+        let failedRows = '';
+        reportData.failed.forEach((s, i) => {
+            failedRows += `
+                <tr>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;">${i + 1}</td>
+                    <td style="border:1px solid #999;padding:6px;">${escapeHtml(s.name)}</td>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${escapeHtml(s.code)}</td>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;color:#c62828;font-weight:bold;">${escapeHtml(s.error)}</td>
+                </tr>
+            `;
+        });
+
+        let noFileRows = '';
+        reportData.noFile.forEach((s, i) => {
+            noFileRows += `
+                <tr>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;">${i + 1}</td>
+                    <td style="border:1px solid #999;padding:6px;">${escapeHtml(s.name)}</td>
+                    <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${escapeHtml(s.code)}</td>
+                </tr>
+            `;
+        });
+
+        const html = `
+            <html xmlns:o="urn:schemas-microsoft-com:office:office"
+                  xmlns:w="urn:schemas-microsoft-com:office:word"
+                  xmlns="http://www.w3.org/TR/REC-html40">
+            <head>
+                <meta charset="UTF-8">
+                <title>گزارش آپلود عکس</title>
+                <style>
+                    body { font-family: Tahoma, Arial; direction: rtl; font-size: 12pt; }
+                    h1 { text-align: center; color: #333; border-bottom: 3px solid #3ecfe0; padding-bottom: 10px; font-size: 18pt; }
+                    h2 { color: #2e7d32; margin-top: 20px; font-size: 15pt; }
+                    h2.failed { color: #c62828; }
+                    h2.nofile { color: #f59e0b; }
+                    .stats { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 15px 0; }
+                    .stats div { margin: 6px 0; font-size: 12pt; }
+                    table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 11pt; }
+                    th { background: #4472C4; color: white; padding: 9px; border: 1px solid #999; font-size: 11pt; }
+                    td { padding: 7px; border: 1px solid #999; }
+                    a { color: #0ea5e9; }
+                    .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 2px dashed #ccc; color: #666; }
+                </style>
+            </head>
+            <body>
+                <h1>📊 گزارش نهایی آپلود عکس دانش‌آموزان</h1>
+
+                <div class="stats">
+                    <div>📅 تاریخ: <b>${new Date().toLocaleString('fa-IR')}</b></div>
+                    <div>⏱️ مدت زمان: <b>${durationStr}</b></div>
+                    <div>📊 تعداد کل: <b>${total}</b></div>
+                    <div>✅ موفق: <b style="color:#2e7d32;">${reportData.success.length}</b></div>
+                    <div>❌ ناموفق: <b style="color:#c62828;">${reportData.failed.length}</b></div>
+                    <div>⏭️ بدون فایل: <b style="color:#f59e0b;">${reportData.noFile.length}</b></div>
+                    <div>📈 نرخ موفقیت: <b style="color:#2e7d32;">${successRate}%</b></div>
+                </div>
+
+                <h2>✅ موفق (${reportData.success.length})</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:40px;">#</th>
+                            <th>نام و فامیل</th>
+                            <th style="width:110px;">کد ملی</th>
+                            <th style="width:100px;">لینک عکس</th>
+                            <th style="width:70px;">وضعیت</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${successRows || '<tr><td colspan="5" style="text-align:center;padding:20px;">هیچ موفقیتی ثبت نشده</td></tr>'}
+                    </tbody>
+                </table>
+
+                <h2 class="failed">❌ ناموفق (${reportData.failed.length})</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:40px;">#</th>
+                            <th>نام و فامیل</th>
+                            <th style="width:110px;">کد ملی</th>
+                            <th>خطا</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${failedRows || '<tr><td colspan="4" style="text-align:center;padding:20px;">هیچ خطایی ثبت نشده</td></tr>'}
+                    </tbody>
+                </table>
+
+                <h2 class="nofile">⏭️ بدون فایل (${reportData.noFile.length})</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:40px;">#</th>
+                            <th>نام و فامیل</th>
+                            <th style="width:110px;">کد ملی</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${noFileRows || '<tr><td colspan="3" style="text-align:center;padding:20px;">همه دانش‌آموزان فایل داشتند</td></tr>'}
+                    </tbody>
+                </table>
+
+                <div class="footer">
+                    طراح: یوسف معصومی
+                </div>
+            </body>
+            </html>
+        `;
+
+        const blob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `گزارش_آپلود_عکس_${new Date().toISOString().slice(0, 10)}.doc`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        showNotification('✅ فایل Word دانلود شد');
+    }
+
+    // ==================== دانلود Excel (CSV) ====================
+    function downloadCsvReport() {
+        if (reportData.success.length + reportData.failed.length + reportData.noFile.length === 0) {
+            alert('⚠️ داده‌ای برای گزارش وجود ندارد');
+            return;
+        }
+
+        const rows = [];
+        rows.push(['وضعیت', 'نام و فامیل', 'کد ملی', 'لینک عکس', 'جزئیات']);
+
+        reportData.success.forEach(s => {
+            const photoUrl = s.photoUrl || buildPhotoUrl(s.path);
+            rows.push(['موفق', s.name, s.code, photoUrl, s.path || '']);
+        });
+
+        reportData.failed.forEach(s => {
+            rows.push(['ناموفق', s.name, s.code, '', s.error || '']);
+        });
+
+        reportData.noFile.forEach(s => {
+            rows.push(['بدون فایل', s.name, s.code, '', 'فایل عکس پیدا نشد']);
+        });
+
+        let csv = '\uFEFF';
+        rows.forEach(row => {
+            csv += row.map(v => {
+                v = String(v == null ? '' : v);
+                if (v.indexOf(',') > -1 || v.indexOf('"') > -1 || v.indexOf('\n') > -1) {
+                    return '"' + v.replace(/"/g, '""') + '"';
+                }
+                return v;
+            }).join(',') + '\r\n';
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `گزارش_آپلود_عکس_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        showNotification('✅ فایل Excel دانلود شد');
+    }
+
+    // ==================== کپی متن گزارش ====================
+    function copyReportText() {
+        const durationMs = (reportData.endTime || Date.now()) - (reportData.startTime || Date.now());
+        const durationSec = Math.floor(durationMs / 1000);
+        const durationMin = Math.floor(durationSec / 60);
+        const durationStr = durationMin > 0
+            ? `${durationMin} دقیقه و ${durationSec % 60} ثانیه`
+            : `${durationSec} ثانیه`;
+        const total = reportData.success.length + reportData.failed.length + reportData.noFile.length;
+        const successRate = total > 0 ? ((reportData.success.length / total) * 100).toFixed(1) : 0;
+
+        let text = '📊 گزارش آپلود عکس دانش‌آموزان\n';
+        text += '═══════════════════════════════\n\n';
+        text += `📅 تاریخ: ${new Date().toLocaleString('fa-IR')}\n`;
+        text += `⏱️ مدت زمان: ${durationStr}\n`;
+        text += `📊 تعداد کل: ${total}\n`;
+        text += `✅ موفق: ${reportData.success.length}\n`;
+        text += `❌ ناموفق: ${reportData.failed.length}\n`;
+        text += `⏭️ بدون فایل: ${reportData.noFile.length}\n`;
+        text += `📈 نرخ موفقیت: ${successRate}%\n\n`;
+
+        if (reportData.success.length > 0) {
+            text += '═══════════════════════════════\n';
+            text += `✅ موفق (${reportData.success.length}):\n`;
+            reportData.success.forEach((s, i) => {
+                const photoUrl = s.photoUrl || buildPhotoUrl(s.path);
+                text += `${i + 1}. ${s.name} (کد: ${s.code})\n`;
+                if (photoUrl) {
+                    text += `   🔗 ${photoUrl}\n`;
+                }
+            });
+            text += '\n';
+        }
+
+        if (reportData.failed.length > 0) {
+            text += '═══════════════════════════════\n';
+            text += `❌ ناموفق (${reportData.failed.length}):\n`;
+            reportData.failed.forEach((s, i) => {
+                text += `${i + 1}. ${s.name} (کد: ${s.code}) — خطا: ${s.error}\n`;
+            });
+            text += '\n';
+        }
+
+        if (reportData.noFile.length > 0) {
+            text += '═══════════════════════════════\n';
+            text += `⏭️ بدون فایل (${reportData.noFile.length}):\n`;
+            reportData.noFile.forEach((s, i) => {
+                text += `${i + 1}. ${s.name} (کد: ${s.code})\n`;
+            });
+        }
+
+        text += '\n═══════════════════════════════\n';
+        text += 'طراح: یوسف معصومی';
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                showNotification('✅ گزارش کپی شد');
+            }).catch(() => {
+                fallbackCopy(text);
+            });
+        } else {
+            fallbackCopy(text);
+        }
+    }
+
+    function fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy');
+            showNotification('✅ گزارش کپی شد');
+        } catch (e) {
+            showNotification('❌ کپی نشد');
+        }
+        document.body.removeChild(ta);
+    }
+
+    // ==================== ساخت پنل ====================
+    function createPanel() {
+        const panel = document.createElement('div');
+        panel.id = 'uploadPanel';
+        panel.style.cssText = 'position:fixed;top:20px;left:20px;background:#1a1a2e;border:2px solid #3ecfe0;border-radius:12px;padding:16px 18px;width:380px;max-width:92vw;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:Tahoma,sans-serif;direction:rtl;font-size:15px;color:#e8e8f0;';
+
+        panel.innerHTML = `
+            <div id="uploadHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #3ecfe0;user-select:none;cursor:move;">
+                <strong style="color:#3ecfe0;font-size:17px;">📸 آپلود خودکار عکس</strong>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button id="btnHelp" style="background:none;border:none;cursor:pointer;font-size:20px;color:#3ecfe0;padding:0;" title="راهنما">❓</button>
+                    <button id="btnClose" style="background:none;border:none;cursor:pointer;font-size:20px;color:#999;padding:0;">✕</button>
+                </div>
+            </div>
+
+            <div style="background:#0f1117;padding:12px;border-radius:8px;margin-bottom:12px;text-align:center;">
+                <div style="font-size:14px;color:#888899;">وضعیت:</div>
+                <div id="uploadStatus" style="font-size:16px;color:#3ecfe0;margin-top:4px;min-height:22px;">آماده شروع</div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;">
+                    <div>
+                        <div style="font-size:12px;color:#888899;">کل</div>
+                        <div id="totalStudents" style="font-size:22px;font-weight:bold;color:#3ecfe0;">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:#888899;">✅ موفق</div>
+                        <div id="processedStudents" style="font-size:22px;font-weight:bold;color:#3ecf8e;">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:#888899;">❌ خطا</div>
+                        <div id="failedStudents" style="font-size:22px;font-weight:bold;color:#ff6b81;">0</div>
+                    </div>
+                </div>
+
+                <div style="font-size:12px;color:#888899;margin-top:8px;">
+                    بدون فایل: <span id="skippedStudents" style="color:#f59e0b;font-weight:bold;">0</span>
+                </div>
+
+                <div id="currentStudent" style="font-size:13px;color:#888899;margin-top:8px;min-height:18px;">---</div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <button id="btnStart" style="background:#3b82f6;color:white;border:none;padding:13px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:16px;">
+                    📁 انتخاب پوشه و شروع
+                </button>
+
+                <div style="display:flex;gap:8px;">
+                    <button id="btnPause" style="display:none;flex:1;background:#f59e0b;color:#0f1117;border:none;padding:12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">
+                        ⏸️ مکث
+                    </button>
+                    <button id="btnStop" style="flex:1;background:#ef4444;color:white;border:none;padding:12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;opacity:0.5;" disabled>
+                        ⛔ توقف
+                    </button>
+                </div>
+
+                <button id="btnShowReport" style="background:#10b981;color:white;border:none;padding:12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;display:none;">
+                    📊 مشاهده گزارش
+                </button>
+
+                <button id="btnReset" style="background:transparent;color:#888899;border:1px solid #2a2d42;padding:9px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:14px;">
+                    🔄 ریست کامل
+                </button>
+            </div>
+        `;
+        document.body.appendChild(panel);
+
+        const header = document.getElementById('uploadHeader');
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        header.onmousedown = function(e) {
+            if (e.target.id === 'btnHelp' || e.target.id === 'btnClose') return;
+            e.preventDefault();
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            document.onmouseup = () => { document.onmouseup = null; document.onmousemove = null; };
+            document.onmousemove = function(e) {
+                e.preventDefault();
+                pos1 = pos3 - e.clientX;
+                pos2 = pos4 - e.clientY;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                panel.style.top = (panel.offsetTop - pos2) + 'px';
+                panel.style.left = (panel.offsetLeft - pos1) + 'px';
+            };
+        };
+
+        document.getElementById('btnClose').onclick = () => {
+            isRunning = false;
+            isPaused = false;
+            isStopped = true;
+            panel.remove();
+        };
+        document.getElementById('btnHelp').onclick = showHelpOverlay;
+        document.getElementById('btnStart').onclick = startUpload;
+        document.getElementById('btnPause').onclick = togglePause;
+        document.getElementById('btnStop').onclick = stopUpload;
+        document.getElementById('btnReset').onclick = resetAll;
+        document.getElementById('btnShowReport').onclick = showReportPanel;
+
+        updateStats();
+        updatePanelButtons();
+    }
+
+    createPanel();
+}
     // ==================== ابزار ۵: جمع‌آوری و ارتقاء ====================
     function collectAndPromote() {
         if (!collectAndPromote.toString().includes('یوسف معصومی')) {
@@ -9777,6 +10686,1051 @@ function pasteFromBinaTool() {
         updateStatus();
         switchSubTab('storage');
         logMsg('پنل آماده است. از تب «عملیات» شروع کنید', 'info');
+    }
+
+    createPanel();
+}
+    // ==================== ابزار ۱۶: استعلام ثبت احوال (API) ====================
+function estelamSabtAhvalTool() {
+    /* طراح: یوسف معصومی - شاغل در آموزش و پرورش ناحیه ۳ تبریز */
+    if (!estelamSabtAhvalTool.toString().includes('یوسف معصومی') ||
+        !estelamSabtAhvalTool.toString().includes('ناحیه ۳ تبریز')) {
+        alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
+        return;
+    }
+
+    cleanupAllPanels();
+
+    if (document.getElementById('estelamPanel')) {
+        document.getElementById('estelamPanel').remove();
+    }
+
+    const PROGRESS_KEY = 'estelam_sabt_ahval_progress_v1';
+    const ENDPOINT = '/api/Student/EstelamSAbtAhvalInfo';
+    const MAX_RETRIES = 10;
+    const RETRY_DELAY = 3000;
+    const DELAY_BETWEEN_STUDENTS = 500;
+
+    let allStudents = [];
+    let pendingStudents = [];
+    let currentIndex = 0;
+    let isRunning = false;
+    let isPaused = false;
+    let isStopped = false;
+    let totalSuccess = 0;
+    let totalLocked = 0;
+    let totalFailed = 0;
+
+    let reportData = {
+        success: [],
+        locked: [],
+        failed: [],
+        startTime: null,
+        endTime: null
+    };
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = String(text);
+        return div.innerHTML;
+    }
+
+    function showNotification(text, duration) {
+        duration = duration || 5000;
+        let old = document.getElementById('estelamNotif');
+        if (old) old.remove();
+        let notif = document.createElement('div');
+        notif.id = 'estelamNotif';
+        notif.style.cssText = 'position:fixed;bottom:20px;left:20px;background:#1a1a2e;color:white;padding:14px 22px;border-radius:8px;z-index:9999999;font-family:Tahoma,sans-serif;font-size:15px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:400px;direction:rtl;line-height:1.6;';
+        notif.textContent = text;
+        notif.addEventListener('click', () => notif.remove());
+        document.body.appendChild(notif);
+        if (duration !== 0) {
+            setTimeout(() => { if (notif.parentNode) notif.remove(); }, duration);
+        }
+    }
+
+    function getToken() {
+        try { var t = sessionStorage.getItem('token'); if (t) return t; } catch (e) {}
+        try { var t2 = localStorage.getItem('token'); if (t2) return t2; } catch (e) {}
+        return null;
+    }
+
+    function getClientId() {
+        try { var c1 = localStorage.getItem('pages-client-id'); if (c1) return c1; } catch (e) {}
+        try { var c2 = sessionStorage.getItem('pages-client-id'); if (c2) return c2; } catch (e) {}
+        return 'mt1ag7vh-f9qt51vf-is5kslgz-am182rru-3pu0h0ne';
+    }
+
+    function getXsrfToken() {
+        try {
+            var match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        } catch (e) { return ''; }
+    }
+
+    function loadProgress() {
+        try {
+            const data = localStorage.getItem(PROGRESS_KEY);
+            if (data) return JSON.parse(data);
+        } catch (e) {}
+        return null;
+    }
+
+    function saveProgress() {
+        try {
+            localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+                students: pendingStudents.map(s => ({
+                    nc: s.nationalCode, fn: s.firstName, ln: s.lastName, bd: s.birthDate
+                })),
+                currentIndex: currentIndex,
+                totalSuccess: totalSuccess,
+                totalLocked: totalLocked,
+                totalFailed: totalFailed,
+                startTime: reportData.startTime,
+                success: reportData.success,
+                locked: reportData.locked,
+                failed: reportData.failed,
+                savedAt: Date.now()
+            }));
+        } catch (e) {}
+    }
+
+    function clearProgress() {
+        try { localStorage.removeItem(PROGRESS_KEY); } catch (e) {}
+    }
+
+    async function fetchAllStudents() {
+        const pageSize = 500;
+        let page = 1;
+        let all = [];
+        let total = 0;
+        let hasMore = true;
+
+        const token = getToken();
+        if (!token) throw new Error('توکن پیدا نشد');
+
+        const clientId = getClientId();
+        let gridFilter = null;
+        try {
+            const gridEl = document.querySelector('.k-grid');
+            if (gridEl) {
+                const grid = $(gridEl).data('kendoGrid');
+                if (grid) gridFilter = grid.dataSource.filter();
+            }
+        } catch (e) {}
+
+        while (hasMore && isRunning) {
+            const body = {
+                take: pageSize, skip: (page - 1) * pageSize,
+                page, pageSize, sort: [{ field: 'id', dir: 'asc' }]
+            };
+            if (gridFilter) body.filter = gridFilter;
+
+            const response = await fetch('/api/Student/GetStudentInfo', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Authorization': 'Bearer ' + token,
+                    'client-id': clientId
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            const json = await response.json();
+            const items = (json.data && json.data.data) || json.data || [];
+            if (!Array.isArray(items) || items.length === 0) break;
+
+            if (json.data && json.data.total) total = json.data.total;
+            all = all.concat(items);
+            setStatus(`دریافت شد: ${all.length}${total ? ' از ' + total : ''}`);
+
+            if (items.length < pageSize) hasMore = false;
+            else page++;
+            await sleep(100);
+        }
+        return all;
+    }
+
+    async function estelamOne(student) {
+        const nationalCode = Number(student.nationalCode);
+        const birthDate = Number(student.birthDate);
+
+        if (!nationalCode || !birthDate || isNaN(birthDate) || birthDate < 13000101) {
+            return { status: 'invalid', message: 'کد ملی یا تاریخ تولد معتبر نیست' };
+        }
+
+        try {
+            const response = await fetch(ENDPOINT, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Authorization': 'Bearer ' + getToken(),
+                    'client-id': getClientId(),
+                    'X-XSRF-TOKEN': getXsrfToken()
+                },
+                body: JSON.stringify({
+                    nationalCode: nationalCode,
+                    birthDate: birthDate,
+                    nationalityTypeId: 1
+                })
+            });
+
+            if (!response.ok) {
+                return { status: 'http_error', message: `HTTP ${response.status}` };
+            }
+
+            const json = await response.json();
+
+            if (json.resultCode === 0) {
+                return { status: 'success', data: json.data || {} };
+            }
+
+            const failuresArr = Array.isArray(json.failures) ? json.failures : [];
+            const failuresText = failuresArr.join(' ');
+            const fullText = failuresText + ' ' + (json.message || '');
+
+            // 🔒 قفل ۲۴ ساعته — هر عددی رو قبول کن
+            if (/ساعت\s*دیگر\s*می\s*توانید\s*استعلام\s*بگیرید/.test(fullText) ||
+                /ساعت\s*دیگر\s*میتوانید\s*استعلام\s*بگیرید/.test(fullText) ||
+                /ساعت\s*دیگر.*استعلام/.test(fullText)) {
+                return { status: 'locked', message: failuresText.trim() };
+            }
+
+            if (/صف\s*استعلام/.test(fullText) || /در\s*صف/.test(fullText)) {
+                return { status: 'queue', message: failuresText.trim() };
+            }
+
+            if (/ثبت\s*احوال/.test(fullText)) {
+                return { status: 'registry_error', message: failuresText.trim() };
+            }
+
+            return { status: 'unknown_error', message: failuresText.trim() || 'خطای نامشخص' };
+
+        } catch (e) {
+            return { status: 'network_error', message: e.message };
+        }
+    }
+
+    async function estelamWithRetry(student) {
+        let lastMessage = '';
+
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            if (!isRunning || isStopped) return { status: 'stopped' };
+            while (isPaused && isRunning && !isStopped) { await sleep(200); }
+            if (!isRunning || isStopped) return { status: 'stopped' };
+
+            setStatus(`⏳ ${student.firstName} ${student.lastName} — تلاش ${attempt}/${MAX_RETRIES}`);
+
+            const result = await estelamOne(student);
+
+            if (result.status === 'success') return result;
+            if (result.status === 'locked') return result;
+            if (result.status === 'invalid') return result;
+
+            lastMessage = result.message || 'خطای نامشخص';
+
+            if (attempt < MAX_RETRIES) {
+                const step = 200;
+                const totalSteps = Math.floor(RETRY_DELAY / step);
+                for (let i = 0; i < totalSteps; i++) {
+                    if (!isRunning || isStopped) return { status: 'stopped' };
+                    if (isPaused) break;
+                    await sleep(step);
+                }
+            }
+        }
+
+        return { status: 'failed', message: lastMessage };
+    }
+
+    async function processAll() {
+        if (!reportData.startTime) reportData.startTime = Date.now();
+
+        while (currentIndex < pendingStudents.length && isRunning && !isPaused && !isStopped) {
+            const student = pendingStudents[currentIndex];
+            const studentName = `${student.firstName || ''} ${student.lastName || ''}`.trim();
+
+            setStatus(`(${currentIndex + 1}/${pendingStudents.length}) ${studentName}`);
+            updateCurrentStudent(studentName, student.nationalCode);
+
+            const result = await estelamWithRetry(student);
+
+            if (result.status === 'stopped') break;
+
+            if (result.status === 'success') {
+                totalSuccess++;
+                reportData.success.push({
+                    name: studentName,
+                    code: student.nationalCode,
+                    birthDate: student.birthDate,
+                    registryName: (result.data && result.data.name) || '',
+                    registryFamily: (result.data && result.data.family) || '',
+                    registryFather: (result.data && result.data.fatherName) || '',
+                    shenasnameSerial: (result.data && result.data.shenasnameSerial) || null,
+                    nin: (result.data && result.data.nin) || null,
+                    time: new Date().toISOString()
+                });
+                showNotification('✅ ' + studentName + ' — موفق', 3000);
+            } else if (result.status === 'locked') {
+                totalLocked++;
+                reportData.locked.push({
+                    name: studentName,
+                    code: student.nationalCode,
+                    birthDate: student.birthDate,
+                    message: result.message,
+                    time: new Date().toISOString()
+                });
+                showNotification('🔒 ' + studentName + ' — قبلاً استعلام شده', 3000);
+            } else {
+                totalFailed++;
+                reportData.failed.push({
+                    name: studentName,
+                    code: student.nationalCode,
+                    birthDate: student.birthDate,
+                    error: result.message || 'ناموفق',
+                    time: new Date().toISOString()
+                });
+                showNotification('❌ ' + studentName + ' — ' + (result.message || 'ناموفق'), 4000);
+            }
+
+            const btnShowReport = document.getElementById('btnEstelamReport');
+            if (btnShowReport) btnShowReport.style.display = 'block';
+
+            currentIndex++;
+            saveProgress();
+            updateStats();
+
+            const step = 100;
+            const steps = Math.floor(DELAY_BETWEEN_STUDENTS / step);
+            for (let i = 0; i < steps; i++) {
+                if (!isRunning || isStopped) break;
+                if (isPaused) break;
+                await sleep(step);
+            }
+        }
+
+        if (currentIndex >= pendingStudents.length && isRunning && !isStopped) {
+            onComplete();
+        }
+    }
+
+    function onComplete() {
+        isRunning = false;
+        reportData.endTime = Date.now();
+        updatePanelButtons();
+        setStatus(`✅ پایان کار`);
+        showNotification(
+            `🎉 پایان! موفق: ${totalSuccess} | قبلاً استعلام: ${totalLocked} | ناموفق: ${totalFailed}`,
+            0
+        );
+        clearProgress();
+
+        const btnShowReport = document.getElementById('btnEstelamReport');
+        if (btnShowReport) btnShowReport.style.display = 'block';
+        showReportPanel();
+    }
+
+    function setStatus(text) {
+        const el = document.getElementById('estelamStatus');
+        if (el) el.textContent = text;
+    }
+
+    function updateCurrentStudent(name, code) {
+        const el = document.getElementById('estelamCurrent');
+        if (el) el.textContent = `${name} (${code})`;
+    }
+
+    function updateStats() {
+        const s = document.getElementById('statSuccess');
+        const l = document.getElementById('statLocked');
+        const f = document.getElementById('statFailed');
+        const t = document.getElementById('statTotal');
+        if (s) s.textContent = totalSuccess;
+        if (l) l.textContent = totalLocked;
+        if (f) f.textContent = totalFailed;
+        if (t) t.textContent = pendingStudents.length;
+    }
+
+    function updatePanelButtons() {
+        const btnStart = document.getElementById('btnEstelamStart');
+        const btnPause = document.getElementById('btnEstelamPause');
+        const btnStop = document.getElementById('btnEstelamStop');
+        const btnReset = document.getElementById('btnEstelamReset');
+
+        if (btnStart) {
+            btnStart.disabled = isRunning;
+            btnStart.style.opacity = isRunning ? '0.5' : '';
+            btnStart.textContent = isPaused ? '▶️ ادامه' :
+                                   isRunning ? '⏳ در حال اجرا...' : '▶️ شروع استعلام';
+        }
+        if (btnPause) {
+            btnPause.style.display = isRunning ? 'inline-block' : 'none';
+            btnPause.textContent = isPaused ? '▶️ ادامه' : '⏸️ مکث';
+        }
+        if (btnStop) {
+            btnStop.disabled = !isRunning;
+            btnStop.style.opacity = !isRunning ? '0.5' : '';
+        }
+        if (btnReset) {
+            btnReset.disabled = isRunning;
+            btnReset.style.opacity = isRunning ? '0.5' : '';
+        }
+    }
+
+    async function startEstelam() {
+        if (isRunning) {
+            if (isPaused) {
+                isPaused = false;
+                updatePanelButtons();
+                showNotification('▶️ ادامه...');
+                await processAll();
+            }
+            return;
+        }
+
+        const progress = loadProgress();
+        if (progress && progress.students && progress.students.length > 0 && progress.currentIndex > 0) {
+            const resume = confirm(
+                `🔄 پیشرفت قبلی پیدا شد:\n\n` +
+                `👥 کل: ${progress.students.length}\n` +
+                `✅ موفق: ${progress.success ? progress.success.length : 0}\n` +
+                `🔒 قبلاً استعلام: ${progress.locked ? progress.locked.length : 0}\n` +
+                `❌ ناموفق: ${progress.failed ? progress.failed.length : 0}\n` +
+                `📍 ادامه از نفر: ${progress.currentIndex + 1}\n\n` +
+                ` ادامه=OK  شروع از اول= cancel`
+            );
+
+            if (resume) {
+                pendingStudents = progress.students.map(s => ({
+                    nationalCode: s.nc, firstName: s.fn, lastName: s.ln, birthDate: s.bd
+                }));
+                currentIndex = progress.currentIndex;
+                totalSuccess = progress.totalSuccess || 0;
+                totalLocked = progress.totalLocked || 0;
+                totalFailed = progress.totalFailed || 0;
+                reportData.success = progress.success || [];
+                reportData.locked = progress.locked || [];
+                reportData.failed = progress.failed || [];
+                reportData.startTime = progress.startTime || Date.now();
+
+                updateStats();
+                setStatus('🔄 ادامه از نفر ' + (currentIndex + 1));
+                isRunning = true;
+                isPaused = false;
+                isStopped = false;
+                updatePanelButtons();
+                await processAll();
+                return;
+            } else {
+                clearProgress();
+            }
+        }
+
+        reportData = { success: [], failed: [], locked: [], startTime: null, endTime: null };
+        totalSuccess = 0;
+        totalLocked = 0;
+        totalFailed = 0;
+        currentIndex = 0;
+
+        const btnShowReport = document.getElementById('btnEstelamReport');
+        if (btnShowReport) btnShowReport.style.display = 'none';
+
+        setStatus('در حال دریافت لیست دانش‌آموزان...');
+        isRunning = true;
+        updatePanelButtons();
+
+        try {
+            allStudents = await fetchAllStudents();
+        } catch (e) {
+            showNotification('❌ خطا در دریافت لیست: ' + e.message);
+            isRunning = false;
+            updatePanelButtons();
+            return;
+        }
+
+        if (!isRunning) return;
+
+        if (allStudents.length === 0) {
+            showNotification('❌ هیچ دانش‌آموزی دریافت نشد');
+            isRunning = false;
+            updatePanelButtons();
+            return;
+        }
+
+        pendingStudents = allStudents.filter(s => {
+            const bd = Number(s.birthDate);
+            return bd && !isNaN(bd) && bd > 13000101 && bd < 15000000;
+        });
+
+        const noBirthDate = allStudents.length - pendingStudents.length;
+
+        showNotification(
+            `📊 کل: ${allStudents.length} | قابل استعلام: ${pendingStudents.length}` +
+            (noBirthDate > 0 ? ` | بدون تاریخ تولد: ${noBirthDate}` : ''),
+            8000
+        );
+
+        if (pendingStudents.length === 0) {
+            setStatus('❌ هیچ دانش‌آموزی برای استعلام نیست');
+            showNotification('❌ هیچ دانش‌آموزی با تاریخ تولد معتبر پیدا نشد', 0);
+            isRunning = false;
+            updatePanelButtons();
+            return;
+        }
+
+        updateStats();
+        setStatus('⏳ در حال استعلام...');
+        await processAll();
+    }
+
+    function togglePause() {
+        if (!isRunning) return;
+        isPaused = !isPaused;
+        updatePanelButtons();
+        setStatus(isPaused ? '⏸️ متوقف موقت' : '⏳ در حال استعلام...');
+        if (!isPaused) processAll();
+    }
+
+    function stopEstelam() {
+        isStopped = true;
+        isRunning = false;
+        isPaused = false;
+        saveProgress();
+        updatePanelButtons();
+        setStatus(`⛔ متوقف شد (تا نفر ${currentIndex})`);
+        showNotification('⛔ متوقف شد — پیشرفت ذخیره شد', 6000);
+
+        const btnShowReport = document.getElementById('btnEstelamReport');
+        if (btnShowReport && (reportData.success.length + reportData.locked.length + reportData.failed.length) > 0) {
+            btnShowReport.style.display = 'block';
+        }
+    }
+
+    function resetAll() {
+        // ✅ همیشه سؤال از اطمینان
+        const confirmMsg = isRunning
+            ? '⚠️ عملیات در حال اجراست!\n\nآیا مطمئن هستید که می‌خواهید همه چیز را ریست کنید؟\n\n(پیشرفت فعلی پاک می‌شود)'
+            : '⚠️ آیا مطمئن هستید؟\n\nتمام پیشرفت، گزارش‌ها و داده‌های ذخیره‌شده پاک می‌شوند.';
+
+        if (!confirm(confirmMsg)) return;
+
+        isRunning = false;
+        isPaused = false;
+        isStopped = false;
+        allStudents = [];
+        pendingStudents = [];
+        currentIndex = 0;
+        totalSuccess = 0;
+        totalLocked = 0;
+        totalFailed = 0;
+        reportData = { success: [], failed: [], locked: [], startTime: null, endTime: null };
+        clearProgress();
+        updateStats();
+        updateCurrentStudent('---', '');
+        updatePanelButtons();
+        setStatus('🔄 ریست شد');
+
+        const btnShowReport = document.getElementById('btnEstelamReport');
+        if (btnShowReport) btnShowReport.style.display = 'none';
+
+        showNotification('✅ ریست کامل انجام شد', 3000);
+    }
+
+   function showHelpOverlay() {
+    const existing = document.getElementById('estelamHelpOverlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'estelamHelpOverlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:99999999;display:flex;align-items:center;justify-content:center;font-family:Tahoma,sans-serif;direction:rtl;padding:20px;box-sizing:border-box;';
+
+    overlay.innerHTML = `
+        <div style="background:#1a1d2e;color:#e8e8f0;border:2px solid #3ecfe0;border-radius:12px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;padding:25px;box-shadow:0 10px 40px rgba(0,0,0,0.5);font-size:16px;line-height:2;position:relative;">
+            <button id="estelamHelpClose" style="position:absolute;top:12px;left:12px;background:#ef4444;color:white;border:none;width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:20px;font-weight:bold;">✕</button>
+
+            <h2 style="color:#3ecfe0;text-align:center;margin-bottom:20px;font-size:22px;border-bottom:3px solid #3ecfe0;padding-bottom:12px;">📖 راهنمای استعلام ثبت احوال</h2>
+
+            <!-- هدف ابزار -->
+            <div style="background:#0f1117;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #3b82f6;">
+                <h3 style="color:#3b82f6;margin-bottom:10px;font-size:20px;">🎯 هدف ابزار</h3>
+                <p>استعلام خودکار ثبت احوال / شناسهٔ یکتا برای همهٔ دانش‌آموزان، بدون نیاز به باز کردن مودال ویرایش.</p>
+            </div>
+
+            <!-- ✅ محل اجرا -->
+            <div style="background:#ecfdf5;color:#065f46;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #10b981;">
+                <h3 style="margin-bottom:10px;font-size:20px;">📍 کجا اجرا بشه؟</h3>
+                <p style="margin-bottom:8px;">قبل از شروع، باید در صفحهٔ <b>«مشخصات فردی»</b> سیدا باشی:</p>
+                <ul style="margin-right:20px;margin-top:8px;">
+                    <li>برو به مسیر <b>مشخصات فردی / لیست دانش‌آموزان</b></li>
+                    <li>مطمئن شو <b>جدول دانش‌آموزان</b> در صفحه دیده می‌شه</li>
+                    <li>اگه می‌خوای فقط یه پایه خاص رو استعلام کنی، از <b>فیلترهای گرید</b> استفاده کن</li>
+                    <li>بعد از فیلتر، ابزار رو اجرا کن — فقط همون‌هایی که تو گرید دیده می‌شن استعلام می‌شن</li>
+
+            </div>
+
+            <!-- 🔄 پیشرفت و ادامه -->
+            <div style="background:#0f1117;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #8b5cf6;">
+                <h3 style="color:#8b5cf6;margin-bottom:10px;font-size:20px;">🔄 پیشرفت و ادامهٔ خودکار</h3>
+                <p style="margin-bottom:8px;">ابزار به‌طور خودکار <b>پیشرفت</b> رو ذخیره می‌کنه — حتی اگه وسط کار:</p>
+                <ul style="margin-right:20px;margin-top:8px;">
+                    <li>⛔ دکمهٔ <b>توقف</b> رو بزنی</li>
+                    <li>🌐 اینترنت قطع بشه</li>
+                    <li>❌ مرورگر بسته بشه</li>
+                    <li>💻 سیستم خاموش بشه</li>
+                </ul>
+                <p style="margin-top:10px;">بار بعد که ابزار رو باز کنی و <b>▶️ شروع استعلام</b> رو بزنی:</p>
+                <ul style="margin-right:20px;margin-top:8px;">
+                    <li>یه پیام نشون می‌ده: «پیشرفت قبلی پیدا شد»</li>
+                    <li>خلاصهٔ آمار قبلی رو می‌بینی (موفق، قبلاً استعلام، ناموفق)</li>
+                    <li>می‌تونی <b>ادامه</b> بدی یا <b>از صفر</b> شروع کنی</li>
+                </ul>
+                <div style="background:#dbeafe;color:#1e40af;padding:10px 12px;border-radius:6px;font-size:18px;margin-top:10px;">
+                    💡 پیشرفت هر دانش‌آموز ذخیره می‌شه، پس هیچ‌وقت کار از دست نمی‌ره
+                </div>
+            </div>
+
+            <!-- 📊 گزارش -->
+            <div style="background:#0f1117;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #8b5cf6;">
+                <h3 style="color:#8b5cf6;margin-bottom:10px;font-size:22px;">📊 گزارش</h3>
+                <ul style="margin-right:20px;margin-top:8px;">
+                    <li>می‌تونی هر لحظه دکمهٔ <b>📊 مشاهده گزارش</b> رو بزنی</li>
+                    <li>خروجی: <b>Word</b>، <b>Excel</b>، <b>کپی متن</b></li>
+                    <li>گزارش شامل ۳ دسته: موفق / قبلاً استعلام / ناموفق</li>
+                </ul>
+            </div>
+
+            <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:2px dashed #2a2d42;color:#3ecfe0;font-weight:bold;font-size:20px;">
+                🎨 طراح: یوسف معصومی
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById('estelamHelpClose').onclick = () => overlay.remove();
+    overlay.onclick = (e) => {
+        if (e.target === overlay) overlay.remove();
+    };
+}
+    function showReportPanel() {
+        if (reportData.success.length + reportData.locked.length + reportData.failed.length === 0) {
+            alert('⚠️ هنوز هیچ داده‌ای برای گزارش وجود ندارد.');
+            return;
+        }
+        const existing = document.getElementById('estelamReportOverlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'estelamReportOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:9999999;display:flex;align-items:center;justify-content:center;font-family:Tahoma,sans-serif;direction:rtl;padding:20px;box-sizing:border-box;';
+
+        function buildSuccessRows() {
+            if (reportData.success.length === 0) return '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px;font-size:15px;">هیچ موفقیتی ثبت نشده</td></tr>';
+            return reportData.success.map((s, i) => `
+                <tr style="border-bottom:1px solid #1a1d2e;">
+                    <td style="padding:10px;text-align:center;color:#888;font-size:14px;">${i + 1}</td>
+                    <td style="padding:10px;font-size:14px;">${escapeHtml(s.name)}</td>
+                    <td style="padding:10px;text-align:center;direction:ltr;font-family:monospace;font-size:14px;">${escapeHtml(String(s.code))}</td>
+                    <td style="padding:10px;text-align:center;direction:ltr;font-family:monospace;font-size:14px;">${escapeHtml(String(s.birthDate))}</td>
+                    <td style="padding:10px;text-align:center;font-size:14px;">${s.shenasnameSerial ? escapeHtml(String(s.shenasnameSerial)) : '-'}</td>
+                </tr>
+            `).join('');
+        }
+
+        function buildLockedRows() {
+            if (reportData.locked.length === 0) return '<tr><td colspan="4" style="text-align:center;color:#888;padding:20px;font-size:15px;">هیچ موردی ثبت نشده</td></tr>';
+            return reportData.locked.map((s, i) => `
+                <tr style="border-bottom:1px solid #1a1d2e;">
+                    <td style="padding:10px;text-align:center;color:#888;font-size:14px;">${i + 1}</td>
+                    <td style="padding:10px;font-size:14px;">${escapeHtml(s.name)}</td>
+                    <td style="padding:10px;text-align:center;direction:ltr;font-family:monospace;font-size:14px;">${escapeHtml(String(s.code))}</td>
+                    <td style="padding:10px;text-align:center;direction:ltr;font-family:monospace;font-size:14px;">${escapeHtml(String(s.birthDate || '-'))}</td>
+                </tr>
+            `).join('');
+        }
+
+        function buildFailedRows() {
+            if (reportData.failed.length === 0) return '<tr><td colspan="4" style="text-align:center;color:#888;padding:20px;font-size:15px;">هیچ خطایی ثبت نشده 🎉</td></tr>';
+            return reportData.failed.map((s, i) => `
+                <tr style="border-bottom:1px solid #1a1d2e;">
+                    <td style="padding:10px;text-align:center;color:#888;font-size:14px;">${i + 1}</td>
+                    <td style="padding:10px;font-size:14px;">${escapeHtml(s.name)}</td>
+                    <td style="padding:10px;text-align:center;direction:ltr;font-family:monospace;font-size:14px;">${escapeHtml(String(s.code))}</td>
+                    <td style="padding:10px;text-align:center;color:#ff6b81;font-size:13px;">${escapeHtml(s.error)}</td>
+                </tr>
+            `).join('');
+        }
+
+        const durationMs = (reportData.endTime || Date.now()) - (reportData.startTime || Date.now());
+        const durationSec = Math.floor(durationMs / 1000);
+        const durationMin = Math.floor(durationSec / 60);
+        const durationStr = durationMin > 0 ? `${durationMin} دقیقه و ${durationSec % 60} ثانیه` : `${durationSec} ثانیه`;
+        const total = reportData.success.length + reportData.locked.length + reportData.failed.length;
+        const successRate = total > 0 ? ((reportData.success.length / total) * 100).toFixed(1) : 0;
+
+        overlay.innerHTML = `
+            <div style="background:#1a1d2e;color:#e8e8f0;border:2px solid #3ecfe0;border-radius:12px;max-width:950px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">
+                <div style="background:#3ecfe0;color:#0f1117;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;">
+                    <strong style="font-size:20px;">📊 گزارش نهایی استعلام ثبت احوال</strong>
+                    <button id="estelamReportClose" style="background:rgba(0,0,0,0.2);color:#0f1117;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:20px;font-weight:bold;">✕</button>
+                </div>
+                <div style="padding:22px;overflow-y:auto;flex:1;">
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px;">
+                        <div style="background:#0f1117;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:13px;color:#888899;">کل</div>
+                            <div style="font-size:28px;font-weight:bold;color:#3ecfe0;">${total}</div>
+                        </div>
+                        <div style="background:#0f1117;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:13px;color:#888899;">✅ موفق</div>
+                            <div style="font-size:28px;font-weight:bold;color:#3ecf8e;">${reportData.success.length}</div>
+                        </div>
+                        <div style="background:#0f1117;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:13px;color:#888899;">🔒 قبلاً استعلام</div>
+                            <div style="font-size:28px;font-weight:bold;color:#f59e0b;">${reportData.locked.length}</div>
+                        </div>
+                        <div style="background:#0f1117;padding:14px;border-radius:8px;text-align:center;">
+                            <div style="font-size:13px;color:#888899;">❌ ناموفق</div>
+                            <div style="font-size:28px;font-weight:bold;color:#ff6b81;">${reportData.failed.length}</div>
+                        </div>
+                    </div>
+                    <div style="background:#0f1117;padding:14px;border-radius:8px;margin-bottom:22px;font-size:15px;line-height:2;">
+                        <div>⏱️ مدت زمان: <b>${durationStr}</b></div>
+                        <div>📈 نرخ موفقیت: <b style="color:#3ecf8e;">${successRate}%</b></div>
+                        <div>📅 تاریخ: <b>${new Date().toLocaleString('fa-IR')}</b></div>
+                    </div>
+                    <div style="margin-bottom:22px;">
+                        <h3 style="color:#3ecf8e;margin-bottom:12px;font-size:18px;">✅ موفق (${reportData.success.length})</h3>
+                        <div style="background:#0f1117;border-radius:8px;max-height:280px;overflow-y:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                                <thead style="position:sticky;top:0;background:#1a1d2e;">
+                                    <tr>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">#</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;text-align:right;">نام و فامیل</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">کد ملی</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">تاریخ تولد</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">سریال شناسنامه</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${buildSuccessRows()}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div style="margin-bottom:22px;">
+                        <h3 style="color:#f59e0b;margin-bottom:12px;font-size:18px;">🔒 قبلاً استعلام‌شده (${reportData.locked.length})</h3>
+                        <div style="background:#0f1117;border-radius:8px;max-height:280px;overflow-y:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                                <thead style="position:sticky;top:0;background:#1a1d2e;">
+                                    <tr>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">#</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;text-align:right;">نام و فامیل</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">کد ملی</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">تاریخ تولد</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${buildLockedRows()}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 style="color:#ff6b81;margin-bottom:12px;font-size:18px;">❌ ناموفق (${reportData.failed.length})</h3>
+                        <div style="background:#0f1117;border-radius:8px;max-height:280px;overflow-y:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                                <thead style="position:sticky;top:0;background:#1a1d2e;">
+                                    <tr>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">#</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;text-align:right;">نام و فامیل</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">کد ملی</th>
+                                        <th style="padding:10px;color:#888899;font-size:13px;">خطا</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${buildFailedRows()}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div style="padding:16px 22px;background:#0f1117;border-top:1px solid #2a2d42;display:flex;gap:10px;flex-wrap:wrap;">
+                    <button id="estelamDownloadWord" style="flex:1;background:#10b981;color:white;border:none;padding:13px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">📄 دانلود Word</button>
+                    <button id="estelamDownloadCsv" style="flex:1;background:#217346;color:white;border:none;padding:13px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">📊 دانلود Excel</button>
+                    <button id="estelamCopyReport" style="flex:1;background:#3b82f6;color:white;border:none;padding:13px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">📋 کپی متن</button>
+                    <button id="estelamCloseReport" style="flex:1;background:#6b7280;color:white;border:none;padding:13px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">بستن</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        document.getElementById('estelamReportClose').onclick = () => overlay.remove();
+        document.getElementById('estelamCloseReport').onclick = () => overlay.remove();
+        document.getElementById('estelamDownloadWord').onclick = () => downloadWordReport();
+        document.getElementById('estelamDownloadCsv').onclick = () => downloadCsvReport();
+        document.getElementById('estelamCopyReport').onclick = () => copyReportText();
+    }
+
+    function downloadWordReport() {
+        if (reportData.success.length + reportData.locked.length + reportData.failed.length === 0) {
+            alert('⚠️ داده‌ای برای گزارش وجود ندارد');
+            return;
+        }
+        const durationMs = (reportData.endTime || Date.now()) - (reportData.startTime || Date.now());
+        const durationSec = Math.floor(durationMs / 1000);
+        const durationMin = Math.floor(durationSec / 60);
+        const durationStr = durationMin > 0 ? `${durationMin} دقیقه و ${durationSec % 60} ثانیه` : `${durationSec} ثانیه`;
+        const total = reportData.success.length + reportData.locked.length + reportData.failed.length;
+        const successRate = total > 0 ? ((reportData.success.length / total) * 100).toFixed(1) : 0;
+
+        let successRows = '', lockedRows = '', failedRows = '';
+        reportData.success.forEach((s, i) => {
+            successRows += `<tr>
+                <td style="border:1px solid #999;padding:6px;text-align:center;">${i + 1}</td>
+                <td style="border:1px solid #999;padding:6px;">${escapeHtml(s.name)}</td>
+                <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${escapeHtml(String(s.code))}</td>
+                <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${escapeHtml(String(s.birthDate))}</td>
+                <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${s.shenasnameSerial ? escapeHtml(String(s.shenasnameSerial)) : '-'}</td>
+                <td style="border:1px solid #999;padding:6px;text-align:center;color:#2e7d32;font-weight:bold;">✅ موفق</td>
+            </tr>`;
+        });
+        reportData.locked.forEach((s, i) => {
+            lockedRows += `<tr>
+                <td style="border:1px solid #999;padding:6px;text-align:center;">${i + 1}</td>
+                <td style="border:1px solid #999;padding:6px;">${escapeHtml(s.name)}</td>
+                <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${escapeHtml(String(s.code))}</td>
+                <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${escapeHtml(String(s.birthDate || '-'))}</td>
+            </tr>`;
+        });
+        reportData.failed.forEach((s, i) => {
+            failedRows += `<tr>
+                <td style="border:1px solid #999;padding:6px;text-align:center;">${i + 1}</td>
+                <td style="border:1px solid #999;padding:6px;">${escapeHtml(s.name)}</td>
+                <td style="border:1px solid #999;padding:6px;text-align:center;font-family:Courier New;">${escapeHtml(String(s.code))}</td>
+                <td style="border:1px solid #999;padding:6px;text-align:center;color:#c62828;font-weight:bold;">${escapeHtml(s.error)}</td>
+            </tr>`;
+        });
+
+        const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+            <head><meta charset="UTF-8"><title>گزارش استعلام</title>
+            <style>
+                body { font-family: Tahoma, Arial; direction: rtl; font-size: 12pt; }
+                h1 { text-align: center; color: #333; border-bottom: 3px solid #3ecfe0; padding-bottom: 10px; font-size: 18pt; }
+                h2 { color: #2e7d32; margin-top: 20px; font-size: 15pt; }
+                h2.locked { color: #f59e0b; }
+                h2.failed { color: #c62828; }
+                .stats { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 15px 0; }
+                .stats div { margin: 6px 0; font-size: 12pt; }
+                table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 11pt; }
+                th { background: #4472C4; color: white; padding: 9px; border: 1px solid #999; font-size: 11pt; }
+                td { padding: 7px; border: 1px solid #999; }
+                .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 2px dashed #ccc; color: #666; }
+            </style></head><body>
+            <h1>📊 گزارش نهایی استعلام ثبت احوال</h1>
+            <div class="stats">
+                <div>📅 تاریخ: <b>${new Date().toLocaleString('fa-IR')}</b></div>
+                <div>⏱️ مدت زمان: <b>${durationStr}</b></div>
+                <div>📊 تعداد کل: <b>${total}</b></div>
+                <div>✅ موفق: <b style="color:#2e7d32;">${reportData.success.length}</b></div>
+                <div>🔒 قبلاً استعلام‌شده: <b style="color:#f59e0b;">${reportData.locked.length}</b></div>
+                <div>❌ ناموفق: <b style="color:#c62828;">${reportData.failed.length}</b></div>
+                <div>📈 نرخ موفقیت: <b style="color:#2e7d32;">${successRate}%</b></div>
+            </div>
+            <h2>✅ موفق (${reportData.success.length})</h2>
+            <table><thead><tr><th style="width:40px;">#</th><th>نام و فامیل</th><th style="width:110px;">کد ملی</th><th style="width:90px;">تاریخ تولد</th><th style="width:90px;">سریال شناسنامه</th><th style="width:70px;">وضعیت</th></tr></thead>
+            <tbody>${successRows || '<tr><td colspan="6" style="text-align:center;padding:20px;">هیچ موفقیتی ثبت نشده</td></tr>'}</tbody></table>
+            <h2 class="locked">🔒 قبلاً استعلام‌شده (${reportData.locked.length})</h2>
+            <table><thead><tr><th style="width:40px;">#</th><th>نام و فامیل</th><th style="width:110px;">کد ملی</th><th style="width:90px;">تاریخ تولد</th></tr></thead>
+            <tbody>${lockedRows || '<tr><td colspan="4" style="text-align:center;padding:20px;">هیچ موردی ثبت نشده</td></tr>'}</tbody></table>
+            <h2 class="failed">❌ ناموفق (${reportData.failed.length})</h2>
+            <table><thead><tr><th style="width:40px;">#</th><th>نام و فامیل</th><th style="width:110px;">کد ملی</th><th>خطا</th></tr></thead>
+            <tbody>${failedRows || '<tr><td colspan="4" style="text-align:center;padding:20px;">هیچ خطایی ثبت نشده</td></tr>'}</tbody></table>
+            <div class="footer">طراح: یوسف معصومی</div>
+            </body></html>`;
+
+        const blob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `گزارش_استعلام_${new Date().toISOString().slice(0, 10)}.doc`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        showNotification('✅ فایل Word دانلود شد');
+    }
+
+    function downloadCsvReport() {
+        if (reportData.success.length + reportData.locked.length + reportData.failed.length === 0) {
+            alert('⚠️ داده‌ای برای گزارش وجود ندارد');
+            return;
+        }
+        const rows = [];
+        rows.push(['وضعیت', 'نام و فامیل', 'کد ملی', 'تاریخ تولد', 'سریال شناسنامه', 'خطا']);
+        reportData.success.forEach(s => rows.push(['موفق', s.name, s.code, s.birthDate, s.shenasnameSerial || '', '']));
+        reportData.locked.forEach(s => rows.push(['قبلاً استعلام', s.name, s.code, s.birthDate || '', '', '']));
+        reportData.failed.forEach(s => rows.push(['ناموفق', s.name, s.code, s.birthDate || '', '', s.error || '']));
+
+        let csv = '\uFEFF';
+        rows.forEach(row => {
+            csv += row.map(v => {
+                v = String(v == null ? '' : v);
+                if (v.indexOf(',') > -1 || v.indexOf('"') > -1 || v.indexOf('\n') > -1) {
+                    return '"' + v.replace(/"/g, '""') + '"';
+                }
+                return v;
+            }).join(',') + '\r\n';
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `گزارش_استعلام_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        showNotification('✅ فایل Excel دانلود شد');
+    }
+
+    function copyReportText() {
+        const durationMs = (reportData.endTime || Date.now()) - (reportData.startTime || Date.now());
+        const durationSec = Math.floor(durationMs / 1000);
+        const durationMin = Math.floor(durationSec / 60);
+        const durationStr = durationMin > 0 ? `${durationMin} دقیقه و ${durationSec % 60} ثانیه` : `${durationSec} ثانیه`;
+        const total = reportData.success.length + reportData.locked.length + reportData.failed.length;
+        const successRate = total > 0 ? ((reportData.success.length / total) * 100).toFixed(1) : 0;
+
+        let text = '📊 گزارش استعلام ثبت احوال\n';
+        text += '═══════════════════════════════\n\n';
+        text += `📅 تاریخ: ${new Date().toLocaleString('fa-IR')}\n`;
+        text += `⏱️ مدت زمان: ${durationStr}\n`;
+        text += `📊 تعداد کل: ${total}\n`;
+        text += `✅ موفق: ${reportData.success.length}\n`;
+        text += `🔒 قبلاً استعلام: ${reportData.locked.length}\n`;
+        text += `❌ ناموفق: ${reportData.failed.length}\n`;
+        text += `📈 نرخ موفقیت: ${successRate}%\n\n`;
+
+        if (reportData.success.length > 0) {
+            text += '═══════════════════════════════\n';
+            text += `✅ موفق (${reportData.success.length}):\n`;
+            reportData.success.forEach((s, i) => { text += `${i + 1}. ${s.name} (کد: ${s.code})\n`; });
+            text += '\n';
+        }
+        if (reportData.locked.length > 0) {
+            text += '═══════════════════════════════\n';
+            text += `🔒 قبلاً استعلام‌شده (${reportData.locked.length}):\n`;
+            reportData.locked.forEach((s, i) => { text += `${i + 1}. ${s.name} (کد: ${s.code})\n`; });
+            text += '\n';
+        }
+        if (reportData.failed.length > 0) {
+            text += '═══════════════════════════════\n';
+            text += `❌ ناموفق (${reportData.failed.length}):\n`;
+            reportData.failed.forEach((s, i) => { text += `${i + 1}. ${s.name} (کد: ${s.code}) — خطا: ${s.error}\n`; });
+        }
+        text += '\n═══════════════════════════════\n';
+        text += 'طراح: یوسف معصومی';
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => showNotification('✅ گزارش کپی شد')).catch(() => fallbackCopy(text));
+        } else {
+            fallbackCopy(text);
+        }
+    }
+
+    function fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy');
+            showNotification('✅ گزارش کپی شد');
+        } catch (e) {
+            showNotification('❌ کپی نشد');
+        }
+        document.body.removeChild(ta);
+    }
+
+    function createPanel() {
+        const panel = document.createElement('div');
+        panel.id = 'estelamPanel';
+        panel.style.cssText = 'position:fixed;top:20px;left:20px;background:#1a1a2e;border:2px solid #3ecfe0;border-radius:12px;padding:16px 18px;width:380px;max-width:92vw;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:Tahoma,sans-serif;direction:rtl;font-size:15px;color:#e8e8f0;';
+
+        panel.innerHTML = `
+            <div id="estelamHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #3ecfe0;user-select:none;cursor:move;">
+                <strong style="color:#3ecfe0;font-size:17px;">🔍 استعلام ثبت احوال/شناسه یکتا </strong>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button id="btnEstelamHelp" style="background:none;border:none;cursor:pointer;font-size:20px;color:#3ecfe0;padding:0;" title="راهنما">❓</button>
+                    <button id="btnEstelamClose" style="background:none;border:none;cursor:pointer;font-size:20px;color:#999;padding:0;">✕</button>
+                </div>
+            </div>
+            <div style="background:#0f1117;padding:12px;border-radius:8px;margin-bottom:12px;text-align:center;">
+                <div style="font-size:14px;color:#888899;">وضعیت:</div>
+                <div id="estelamStatus" style="font-size:16px;color:#3ecfe0;margin-top:4px;min-height:22px;">آماده شروع</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;">
+                    <div>
+                        <div style="font-size:12px;color:#888899;">✅ موفق</div>
+                        <div id="statSuccess" style="font-size:22px;font-weight:bold;color:#3ecf8e;">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:#888899;">🔒 قبلاً</div>
+                        <div id="statLocked" style="font-size:22px;font-weight:bold;color:#f59e0b;">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:#888899;">❌ ناموفق</div>
+                        <div id="statFailed" style="font-size:22px;font-weight:bold;color:#ff6b81;">0</div>
+                    </div>
+                </div>
+                <div style="font-size:12px;color:#888899;margin-top:8px;">کل: <span id="statTotal" style="color:#3ecfe0;font-weight:bold;">0</span></div>
+                <div id="estelamCurrent" style="font-size:13px;color:#888899;margin-top:8px;min-height:18px;">---</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <button id="btnEstelamStart" style="background:#3b82f6;color:white;border:none;padding:13px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:16px;">▶️ شروع استعلام</button>
+                <div style="display:flex;gap:8px;">
+                    <button id="btnEstelamPause" style="display:none;flex:1;background:#f59e0b;color:#0f1117;border:none;padding:12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;">⏸️ مکث</button>
+                    <button id="btnEstelamStop" style="flex:1;background:#ef4444;color:white;border:none;padding:12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;opacity:0.5;" disabled>⛔ توقف</button>
+                </div>
+                <button id="btnEstelamReport" style="background:#10b981;color:white;border:none;padding:12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:15px;display:none;">📊 مشاهده گزارش</button>
+                <button id="btnEstelamReset" style="background:transparent;color:#888899;border:1px solid #2a2d42;padding:9px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:14px;">🔄 ریست کامل</button>
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:#555577;text-align:center;border-top:1px solid #2a2d42;padding-top:8px;"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const header = document.getElementById('estelamHeader');
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        header.onmousedown = function(e) {
+            if (e.target.id === 'btnEstelamHelp' || e.target.id === 'btnEstelamClose') return;
+            e.preventDefault();
+            pos3 = e.clientX; pos4 = e.clientY;
+            document.onmouseup = () => { document.onmouseup = null; document.onmousemove = null; };
+            document.onmousemove = function(e) {
+                e.preventDefault();
+                pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
+                pos3 = e.clientX; pos4 = e.clientY;
+                panel.style.top = (panel.offsetTop - pos2) + 'px';
+                panel.style.left = (panel.offsetLeft - pos1) + 'px';
+            };
+        };
+
+        document.getElementById('btnEstelamClose').onclick = () => {
+            isRunning = false; isPaused = false; isStopped = true;
+            panel.remove();
+        };
+        document.getElementById('btnEstelamHelp').onclick = showHelpOverlay;
+        document.getElementById('btnEstelamStart').onclick = startEstelam;
+        document.getElementById('btnEstelamPause').onclick = togglePause;
+        document.getElementById('btnEstelamStop').onclick = stopEstelam;
+        document.getElementById('btnEstelamReset').onclick = resetAll;
+        document.getElementById('btnEstelamReport').onclick = showReportPanel;
+
+        updateStats();
+        updatePanelButtons();
     }
 
     createPanel();
