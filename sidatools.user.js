@@ -990,262 +990,445 @@
         });
     }
 
-    // ==================== ابزار ۱: فشرده‌سازی کارنامه ====================
-    function compressReportCard() {
-        if (!compressReportCard.toString().includes('یوسف معصومی')) {
-            alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
-            return;
-        }
-
-        cleanupAllPanels();
-
-        function addCompressStyle() {
-            let style = document.createElement('style');
-            style.textContent = '@media print{body{margin:0.08in !important;padding:0 !important;}*{font-size:11.5px !important;line-height:1.3 !important;}table{font-size:10.5px !important;}td{padding:2px 3px !important;}.description,.toshihy,td[colspan],.matn{font-size:10.5px !important;line-height:1.3 !important;}table,tr,td,div,section,article{page-break-inside:avoid !important;break-inside:avoid !important;}@page{margin:0.12in;}}';
-            document.head.appendChild(style);
-        }
-
-        function getPrintHeight() {
-            return 1123;
-        }
-
-        function checkIfTwoPages() {
-            let bodyHeight = document.body.scrollHeight;
-            let pageHeight = getPrintHeight();
-            return bodyHeight > pageHeight * 1.15;
-        }
-
-        function smartCompress() {
-            if (!checkIfTwoPages()) return;
-            let styles = document.createElement('style');
-            let reductions = [
-                {fontSize: 0.85, tableFont: 0.85, lineHeight: 0.9, tdPad: 0.6, bodyMargin: 0.6, pageMargin: 0.6},
-                {fontSize: 0.75, tableFont: 0.75, lineHeight: 0.8, tdPad: 0.4, bodyMargin: 0.4, pageMargin: 0.4},
-                {fontSize: 0.65, tableFont: 0.65, lineHeight: 0.75, tdPad: 0.2, bodyMargin: 0.2, pageMargin: 0.2}
-            ];
-            for (let r of reductions) {
-                let newFs = Math.max(6, 11.5 * r.fontSize);
-                let newTf = Math.max(6, 10.5 * r.tableFont);
-                let newLh = Math.max(1, 1.3 * r.lineHeight);
-                let newTp = Math.max(0, Math.round(2 * r.tdPad));
-                let newBm = Math.max(0, 0.08 * r.bodyMargin);
-                let newPm = Math.max(0, 0.12 * r.pageMargin);
-                styles.textContent = '@media print{body{margin:' + newBm.toFixed(2) + 'in !important;padding:0 !important;}*{font-size:' + newFs.toFixed(1) + 'px !important;line-height:' + newLh.toFixed(1) + ' !important;}table{font-size:' + newTf.toFixed(1) + 'px !important;}td{padding:' + newTp + 'px 2px !important;}.description,.toshihy,td[colspan],.matn{font-size:' + newTf.toFixed(1) + 'px !important;line-height:' + newLh.toFixed(1) + ' !important;}table,tr,td,div,section,article{page-break-inside:avoid !important;break-inside:avoid !important;}@page{margin:' + newPm.toFixed(2) + 'in;}}';
-                document.head.appendChild(styles);
-                let newBodyHeight = document.body.scrollHeight;
-                if (newBodyHeight < getPrintHeight() * 1.05) break;
-            }
-        }
-
-        let allCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]')]
-            .filter(cb => !cb.closest('thead'));
-
-        if (!allCheckboxes.length) {
-            alert('چک‌باکسی پیدا نشد!');
-            return;
-        }
-
-        let checkedCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]:checked')]
-            .filter(cb => !cb.closest('thead'));
-
-        let selectedCount;
-        if (checkedCheckboxes.length > 0) {
-            selectedCount = checkedCheckboxes.length;
-            checkedCheckboxes.forEach(cb => {
-                if (!cb.checked) cb.click();
-            });
-            alert(selectedCount + ' دانش‌آموز انتخاب شده‌اند.');
-        } else {
-            selectedCount = allCheckboxes.length;
-            allCheckboxes.forEach(cb => {
-                if (!cb.checked) cb.click();
-            });
-            alert(selectedCount + ' دانش‌آموز به صورت خودکار انتخاب شدند.');
-        }
-
-        let btn = [...document.querySelectorAll('button,input')]
-            .find(el => el.innerText.includes('کارنامه برای رکوردهای انتخاب شده'));
-
-        if (!btn) {
-            alert('دکمه پیدا نشد!');
-            return;
-        }
-
-        btn.click();
-
-        setTimeout(function() {
-            addCompressStyle();
-            smartCompress();
-            setTimeout(function() {
-                let printBtn = [...document.querySelectorAll('button,input')]
-                    .find(el => el.innerText.includes('پرینت') || el.innerText.includes('چاپ'));
-                if (printBtn) {
-                    printBtn.style.outline = '3px solid #f5a623';
-                    printBtn.style.outlineOffset = '2px';
-                    printBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    alert('✅ فشرده‌سازی هوشمند اعمال شد.\n\n🖨️ لطفاً حالا دکمه پرینت را به صورت دستی بزنید.');
-                } else {
-                    alert('✅ فشرده‌سازی اعمال شد، اما دکمه پرینت پیدا نشد. لطفاً خودتان پرینت بگیرید.');
-                }
-            }, 500);
-        }, 4000);
+    // ==================== ابزار ۱: فشرده‌سازی کارنامه (نسخهٔ هوشمند - پشتیبانی از توصیفی) ====================
+function compressReportCard() {
+    if (!compressReportCard.toString().includes('یوسف معصومی')) {
+        alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
+        return;
     }
 
-    // ==================== ابزار ۲: چاپ گروهی هوشمند ====================
-    function smartGroupPrint() {
-        if (!smartGroupPrint.toString().includes('یوسف معصومی')) {
-            alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
-            return;
+    cleanupAllPanels();
+
+    // ==================== تشخیص پیش‌نمایش ====================
+    function isPreviewReady() {
+        // ✅ روش ۱: کامنت ksarnamehs (کارنامهٔ غیرتوصیفی)
+        const iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
+        let c;
+        while ((c = iterator.nextNode())) {
+            if (c.nodeValue && c.nodeValue.includes('ksarnamehs')) return true;
         }
 
-        cleanupAllPanels();
+        // ✅ روش ۲: جدول‌های کارنامهٔ توصیفی
+        const newHeaderTables = document.querySelectorAll('table.table-bordered.newHeader');
+        const ngScopeTables = document.querySelectorAll('table.table-bordered.ng-scope');
+        if (newHeaderTables.length >= 2 && ngScopeTables.length >= 1) {
+            return true;
+        }
 
-        const TOP_SPACING = 10;
+        // ✅ روش ۳: متن «کارنامه توصیفی»
+        const bodyText = document.body.innerText || '';
+        if ((bodyText.includes('کارنامه توصیفی') || 
+             bodyText.includes('کارنامه کیفی و توصیفی') ||
+             bodyText.includes('کارنامه کیفی')) &&
+            document.querySelectorAll('table').length >= 2) {
+            return true;
+        }
 
-        function getGrade() {
-            let gradeCells = document.querySelectorAll('td.btext, td[class*="btext"]');
-            for (let cell of gradeCells) {
-                let text = cell.innerText.trim();
-                if (['اول', 'دوم', 'سوم', 'چهارم', 'پنجم', 'ششم', '1', '2', '3', '4', '5', '6'].includes(text)) {
-                    return text;
-                }
+        return false;
+    }
+
+    // ==================== تشخیص پایه ====================
+    function getGrade() {
+        // از td.btext
+        const gradeCells = document.querySelectorAll('td.btext, td[class*="btext"]');
+        for (let cell of gradeCells) {
+            const text = cell.innerText.trim();
+            if (['اول','دوم','سوم','چهارم','پنجم','ششم','1','2','3','4','5','6'].includes(text)) {
+                return text;
             }
-            let headers = document.querySelectorAll('th');
-            let gradeIndex = -1;
-            for (let th of headers) {
-                if (th.innerText.trim() === 'پایه' || th.innerText.trim() === 'پایه ') {
-                    gradeIndex = Array.from(th.parentElement.children).indexOf(th);
-                    break;
-                }
+        }
+
+        // از جدول‌ها
+        const headers = document.querySelectorAll('th');
+        let gradeIndex = -1;
+        for (let th of headers) {
+            if (th.innerText.trim() === 'پایه' || th.innerText.trim() === 'پایه ') {
+                gradeIndex = Array.from(th.parentElement.children).indexOf(th);
+                break;
             }
-            if (gradeIndex !== -1) {
-                let rows = document.querySelectorAll('table tbody tr');
-                for (let row of rows) {
-                    let cells = row.querySelectorAll('td');
-                    if (cells.length > gradeIndex) {
-                        let text = cells[gradeIndex].innerText.trim();
-                        if (['اول', 'دوم', 'سوم', 'چهارم', 'پنجم', 'ششم', '1', '2', '3', '4', '5', '6'].includes(text)) {
-                            return text;
-                        }
+        }
+        if (gradeIndex !== -1) {
+            const rows = document.querySelectorAll('table tbody tr');
+            for (let row of rows) {
+                const cells = row.querySelectorAll('td');
+                if (cells.length > gradeIndex) {
+                    const text = cells[gradeIndex].innerText.trim();
+                    if (['اول','دوم','سوم','چهارم','پنجم','ششم','1','2','3','4','5','6'].includes(text)) {
+                        return text;
                     }
                 }
             }
-            let pageTitle = document.title || '';
-            if (pageTitle.includes('پایه اول') || pageTitle.includes('پایه ۱')) return 'اول';
-            if (pageTitle.includes('پایه دوم') || pageTitle.includes('پایه ۲')) return 'دوم';
-            if (pageTitle.includes('پایه سوم') || pageTitle.includes('پایه ۳')) return 'سوم';
-            if (pageTitle.includes('پایه چهارم') || pageTitle.includes('پایه ۴')) return 'چهارم';
-            if (pageTitle.includes('پایه پنجم') || pageTitle.includes('پایه ۵')) return 'پنجم';
-            if (pageTitle.includes('پایه ششم') || pageTitle.includes('پایه ۶')) return 'ششم';
-            return 'سوم';
         }
 
-        function getBetweenSpacing(grade) {
-            let g = grade ? grade.toString().trim() : '';
-            if (g === 'اول' || g === '1' || g.includes('اول')) return 130;
-            if (g === 'دوم' || g === '2' || g.includes('دوم')) return 100;
-            if (g === 'ششم' || g === '6' || g.includes('ششم')) return 3;
-            return 65;
-        }
+        // از متن body
+        const bodyText = document.body.innerText || '';
+        if (bodyText.includes('پایه اول')) return 'اول';
+        if (bodyText.includes('پایه دوم')) return 'دوم';
+        if (bodyText.includes('پایه سوم')) return 'سوم';
+        if (bodyText.includes('پایه چهارم')) return 'چهارم';
+        if (bodyText.includes('پایه پنجم')) return 'پنجم';
+        if (bodyText.includes('پایه ششم')) return 'ششم';
 
-        function addSpacersToPage() {
-            let tables = document.querySelectorAll('table');
-            if (tables.length === 0) return false;
-            let grade = getGrade();
-            let betweenSpacing = getBetweenSpacing(grade);
-            let comments = [];
-            let iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
-            let c;
-            while (c = iterator.nextNode()) {
-                if (c.nodeValue && c.nodeValue.includes('end ngRepeat') && c.nodeValue.includes('ksarnamehs')) {
-                    comments.push(c);
-                }
-            }
-            comments.forEach(function(comment, index) {
-                if (index % 2 === 1) {
-                    let topSpacer = document.createElement('div');
-                    topSpacer.style.height = TOP_SPACING + 'px';
-                    topSpacer.style.margin = '0';
-                    topSpacer.style.padding = '0';
-                    topSpacer.style.backgroundColor = 'transparent';
-                    topSpacer.style.display = 'block';
-                    topSpacer.style.pageBreakBefore = 'always';
-                    comment.parentNode.insertBefore(topSpacer, comment.nextSibling);
-                } else {
-                    let spacer = document.createElement('div');
-                    spacer.style.height = betweenSpacing + 'px';
-                    spacer.style.margin = '15px 0';
-                    spacer.style.padding = '0';
-                    spacer.style.backgroundColor = 'transparent';
-                    spacer.style.display = 'block';
-                    comment.parentNode.insertBefore(spacer, comment.nextSibling);
-                }
-            });
-            let firstTopSpacer = document.createElement('div');
-            firstTopSpacer.style.height = TOP_SPACING + 'px';
-            firstTopSpacer.style.margin = '0';
-            firstTopSpacer.style.padding = '0';
-            firstTopSpacer.style.backgroundColor = 'transparent';
-            firstTopSpacer.style.display = 'block';
-            let firstTable = tables[0];
-            if (firstTable) {
-                firstTable.parentNode.insertBefore(firstTopSpacer, firstTable);
-            }
-            return betweenSpacing;
-        }
-
-        let allCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]')]
-            .filter(cb => !cb.closest('thead'));
-
-        if (!allCheckboxes.length) {
-            alert('چک‌باکسی پیدا نشد!');
-            return;
-        }
-
-        let checkedCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]:checked')]
-            .filter(cb => !cb.closest('thead'));
-
-        let selectedCount;
-        if (checkedCheckboxes.length > 0) {
-            selectedCount = checkedCheckboxes.length;
-            checkedCheckboxes.forEach(cb => {
-                if (!cb.checked) cb.click();
-            });
-            alert(selectedCount + ' دانش‌آموز انتخاب شده‌اند.');
-        } else {
-            selectedCount = allCheckboxes.length;
-            allCheckboxes.forEach(cb => {
-                if (!cb.checked) cb.click();
-            });
-            alert(selectedCount + ' دانش‌آموز به صورت خودکار انتخاب شدند.');
-        }
-
-        let btn = [...document.querySelectorAll('button,input')]
-            .find(el => el.innerText.includes('کارنامه برای رکوردهای انتخاب شده'));
-
-        if (!btn) {
-            alert('دکمه پیدا نشد!');
-            return;
-        }
-
-        btn.click();
-
-        setTimeout(function() {
-            let usedSpacing = addSpacersToPage();
-            setTimeout(function() {
-                let printBtn = [...document.querySelectorAll('button,input')]
-                    .find(el => el.innerText.includes('پرینت') || el.innerText.includes('چاپ'));
-                if (printBtn) {
-                    printBtn.style.outline = '3px solid #f5a623';
-                    printBtn.style.outlineOffset = '2px';
-                    printBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    alert('✅ فاصله ' + TOP_SPACING + 'px بالای هر صفحه و ' + usedSpacing + 'px بین کارنامه‌ها (هوشمند) اضافه شد.\n\n🖨️ لطفاً حالا دکمه پرینت را به صورت دستی بزنید.');
-                } else {
-                    alert('✅ فاصله‌ها اضافه شد، اما دکمه پرینت پیدا نشد. لطفاً خودتان پرینت بگیرید.');
-                }
-            }, 500);
-        }, 4000);
+        // از title
+        const pageTitle = document.title || '';
+        if (pageTitle.includes('پایه اول') || pageTitle.includes('پایه ۱')) return 'اول';
+        if (pageTitle.includes('پایه دوم') || pageTitle.includes('پایه ۲')) return 'دوم';
+        if (pageTitle.includes('پایه سوم') || pageTitle.includes('پایه ۳')) return 'سوم';
+        if (pageTitle.includes('پایه چهارم') || pageTitle.includes('پایه ۴')) return 'چهارم';
+        if (pageTitle.includes('پایه پنجم') || pageTitle.includes('پایه ۵')) return 'پنجم';
+        if (pageTitle.includes('پایه ششم') || pageTitle.includes('پایه ۶')) return 'ششم';
+        return 'سوم';
     }
+
+    // ==================== فاصله بر اساس پایه ====================
+    function getBetweenSpacing(grade) {
+        const g = grade ? grade.toString().trim() : '';
+        if (g === 'اول' || g === '1' || g.includes('اول')) return 130;
+        if (g === 'دوم' || g === '2' || g.includes('دوم')) return 100;
+        if (g === 'ششم' || g === '6' || g.includes('ششم')) return 3;
+        return 65;
+    }
+
+    // ==================== اضافه کردن استایل چاپ ====================
+    function addCompressStyle() {
+        // حذف استایل‌های قبلی
+        document.querySelectorAll('.sida-compress-style').forEach(el => el.remove());
+
+        const style = document.createElement('style');
+        style.className = 'sida-compress-style';
+        style.textContent = '@media print{body{margin:0.08in !important;padding:0 !important;}*{font-size:11.5px !important;line-height:1.3 !important;}table{font-size:10.5px !important;}td{padding:2px 3px !important;}.description,.toshihy,td[colspan],.matn{font-size:10.5px !important;line-height:1.3 !important;}table,tr,td,div,section,article{page-break-inside:avoid !important;break-inside:avoid !important;}@page{margin:0.12in;}}';
+        document.head.appendChild(style);
+    }
+
+    // ==================== فشرده‌سازی هوشمند ====================
+    function getPrintHeight() {
+        return 1123;
+    }
+
+    function checkIfTwoPages() {
+        return document.body.scrollHeight > getPrintHeight() * 1.15;
+    }
+
+    function smartCompress() {
+        if (!checkIfTwoPages()) return;
+
+        const styles = document.createElement('style');
+        styles.className = 'sida-compress-style';
+
+        const reductions = [
+            {fontSize: 0.85, tableFont: 0.85, lineHeight: 0.9, tdPad: 0.6, bodyMargin: 0.6, pageMargin: 0.6},
+            {fontSize: 0.75, tableFont: 0.75, lineHeight: 0.8, tdPad: 0.4, bodyMargin: 0.4, pageMargin: 0.4},
+            {fontSize: 0.65, tableFont: 0.65, lineHeight: 0.75, tdPad: 0.2, bodyMargin: 0.2, pageMargin: 0.2}
+        ];
+
+        for (const r of reductions) {
+            const newFs = Math.max(6, 11.5 * r.fontSize);
+            const newTf = Math.max(6, 10.5 * r.tableFont);
+            const newLh = Math.max(1, 1.3 * r.lineHeight);
+            const newTp = Math.max(0, Math.round(2 * r.tdPad));
+            const newBm = Math.max(0, 0.08 * r.bodyMargin);
+            const newPm = Math.max(0, 0.12 * r.pageMargin);
+
+            styles.textContent = '@media print{body{margin:' + newBm.toFixed(2) + 'in !important;padding:0 !important;}*{font-size:' + newFs.toFixed(1) + 'px !important;line-height:' + newLh.toFixed(1) + ' !important;}table{font-size:' + newTf.toFixed(1) + 'px !important;}td{padding:' + newTp + 'px 2px !important;}.description,.toshihy,td[colspan],.matn{font-size:' + newTf.toFixed(1) + 'px !important;line-height:' + newLh.toFixed(1) + ' !important;}table,tr,td,div,section,article{page-break-inside:avoid !important;break-inside:avoid !important;}@page{margin:' + newPm.toFixed(2) + 'in;}}';
+            document.head.appendChild(styles);
+
+            if (document.body.scrollHeight < getPrintHeight() * 1.05) break;
+        }
+    }
+
+    // ==================== اعمال فاصله‌ها (هوشمند) ====================
+    function addSpacersToPage() {
+        const TOP_SPACING = 10;
+        const tables = document.querySelectorAll('table');
+        if (tables.length === 0) return 0;
+
+        // حذف اسپیسرهای قبلی
+        document.querySelectorAll('.sida-print-spacer').forEach(el => el.remove());
+
+        // ✅ پیدا کردن کامنت‌های end ngRepeat: rowItem in dataItems
+        // این کامنت‌ها بین کارنامه‌ها هستن
+        const comments = [];
+        const iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
+        let c;
+        while ((c = iterator.nextNode())) {
+            if (c.nodeValue && 
+                c.nodeValue.includes('end ngRepeat') && 
+                c.nodeValue.includes('rowItem in dataItems')) {
+                comments.push(c);
+            }
+        }
+
+        if (comments.length === 0) {
+            // ✅ fallback: اگه کامنت پیدا نشد، از جدول‌ها استفاده کن
+            console.log('⚠️ کامنت‌های ngRepeat پیدا نشد، استفاده از جدول‌ها');
+            const newHeaderTables = document.querySelectorAll('table.table-bordered.newHeader');
+            if (newHeaderTables.length > 0) {
+                newHeaderTables.forEach((table, index) => {
+                    const spacer = document.createElement('div');
+                    spacer.className = 'sida-print-spacer';
+                    spacer.style.cssText = 'height:' + getBetweenSpacing(getGrade()) + 'px;margin:15px 0;padding:0;background:transparent;display:block;';
+                    table.parentNode.insertBefore(spacer, table);
+                });
+                return getBetweenSpacing(getGrade());
+            }
+            return 0;
+        }
+
+        // ✅ برای هر کامنت، spacer اضافه کن
+        const betweenSpacing = getBetweenSpacing(getGrade());
+        
+        comments.forEach((comment, index) => {
+            // هر کارنامهٔ توصیفی = 4 جدول
+            // کامنت end ngRepeat: rowItem in dataItems بعد از هر کارنامه‌ست
+            const spacer = document.createElement('div');
+            spacer.className = 'sida-print-spacer';
+            
+            // ✅ بین کارنامه‌ها
+            spacer.style.cssText = 'height:' + betweenSpacing + 'px;margin:15px 0;padding:0;background:transparent;display:block;page-break-after:always;';
+            
+            comment.parentNode.insertBefore(spacer, comment.nextSibling);
+        });
+
+        // اسپیسر اولیه
+        const firstTopSpacer = document.createElement('div');
+        firstTopSpacer.className = 'sida-print-spacer';
+        firstTopSpacer.style.cssText = 'height:' + TOP_SPACING + 'px;margin:0;padding:0;background:transparent;display:block;';
+        if (tables[0]) {
+            tables[0].parentNode.insertBefore(firstTopSpacer, tables[0]);
+        }
+
+        return betweenSpacing;
+    }
+
+    // ==================== اجرای اصلی ====================
+    if (isPreviewReady()) {
+        // ✅ پیش‌نمایش بازه → فوراً فشرده‌سازی کن
+        addCompressStyle();
+        smartCompress();
+        const usedSpacing = addSpacersToPage();
+
+        let printBtn = Array.from(document.querySelectorAll('button,input'))
+            .find(el => el.innerText && (el.innerText.includes('پرینت') || el.innerText.includes('چاپ')));
+
+        if (printBtn) {
+            printBtn.style.outline = '3px solid #f5a623';
+            printBtn.style.outlineOffset = '2px';
+            printBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            alert('✅ فشرده‌سازی هوشمند اعمال شد.\n\n' + 
+                  '📊 نوع کارنامه: ' + (document.querySelector('table.table-bordered.ng-scope') ? 'توصیفی' : 'عادی') + '\n' +
+                  '📏 فاصله: ' + usedSpacing + 'px\n\n' +
+                  '🖨️ لطفاً حالا دکمه پرینت را به صورت دستی بزنید.');
+        } else {
+            alert('✅ فشرده‌سازی اعمال شد، اما دکمه پرینت پیدا نشد. لطفاً خودتان پرینت بگیرید.');
+        }
+        return;
+    }
+
+    // ✅ پیش‌نمایش بسته‌ست → چک‌باکس‌ها تیک بزن و دکمه خروجی کلیک کن
+    const allCheckboxes = Array.from(document.querySelectorAll('table input[type="checkbox"]'))
+        .filter(cb => !cb.closest('thead'));
+
+    if (!allCheckboxes.length) {
+        alert('چک‌باکسی پیدا نشد!\n\nمطمئن شو در صفحهٔ لیست دانش‌آموزان هستی.');
+        return;
+    }
+
+    const checkedCount = allCheckboxes.filter(cb => cb.checked).length;
+    if (checkedCount === 0) {
+        allCheckboxes.forEach(cb => { if (!cb.checked) cb.click(); });
+    }
+
+    const btn = Array.from(document.querySelectorAll('button,input'))
+        .find(el => el.innerText && el.innerText.includes('کارنامه برای رکوردهای انتخاب شده'));
+
+    if (!btn) {
+        alert('دکمهٔ «کارنامه برای رکوردهای انتخاب شده» پیدا نشد!');
+        return;
+    }
+
+    btn.click();
+
+    alert('✅ ' + (checkedCount || allCheckboxes.length) + ' دانش‌آموز انتخاب شدند و درخواست خروجی ارسال شد.\n\n' +
+          '⏳ لطفاً صبر کنید تا پیش‌نمایش در صفحه باز شود، سپس دوباره روی دکمهٔ «فشرده‌سازی کارنامه» در منوی ابزارها کلیک کنید.');
+}
+    // ==================== ابزار ۲: چاپ گروهی هوشمند (نسخهٔ دستی - پس از پیش‌نمایش) ====================
+function smartGroupPrint() {
+    if (!smartGroupPrint.toString().includes('یوسف معصومی')) {
+        alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
+        return;
+    }
+
+    cleanupAllPanels();
+
+    const TOP_SPACING = 10;
+
+    // ✅ تشخیص وجود پیش‌نمایش (کامنت ksarnamehs)
+    function isPreviewReady() {
+        const iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
+        let c;
+        while ((c = iterator.nextNode())) {
+            if (c.nodeValue && c.nodeValue.includes('ksarnamehs')) return true;
+        }
+        return false;
+    }
+
+    // ✅ تشخیص پایه
+    function getGrade() {
+        let gradeCells = document.querySelectorAll('td.btext, td[class*="btext"]');
+        for (let cell of gradeCells) {
+            let text = cell.innerText.trim();
+            if (['اول', 'دوم', 'سوم', 'چهارم', 'پنجم', 'ششم', '1', '2', '3', '4', '5', '6'].includes(text)) {
+                return text;
+            }
+        }
+        let headers = document.querySelectorAll('th');
+        let gradeIndex = -1;
+        for (let th of headers) {
+            if (th.innerText.trim() === 'پایه' || th.innerText.trim() === 'پایه ') {
+                gradeIndex = Array.from(th.parentElement.children).indexOf(th);
+                break;
+            }
+        }
+        if (gradeIndex !== -1) {
+            let rows = document.querySelectorAll('table tbody tr');
+            for (let row of rows) {
+                let cells = row.querySelectorAll('td');
+                if (cells.length > gradeIndex) {
+                    let text = cells[gradeIndex].innerText.trim();
+                    if (['اول', 'دوم', 'سوم', 'چهارم', 'پنجم', 'ششم', '1', '2', '3', '4', '5', '6'].includes(text)) {
+                        return text;
+                    }
+                }
+            }
+        }
+        let pageTitle = document.title || '';
+        if (pageTitle.includes('پایه اول') || pageTitle.includes('پایه ۱')) return 'اول';
+        if (pageTitle.includes('پایه دوم') || pageTitle.includes('پایه ۲')) return 'دوم';
+        if (pageTitle.includes('پایه سوم') || pageTitle.includes('پایه ۳')) return 'سوم';
+        if (pageTitle.includes('پایه چهارم') || pageTitle.includes('پایه ۴')) return 'چهارم';
+        if (pageTitle.includes('پایه پنجم') || pageTitle.includes('پایه ۵')) return 'پنجم';
+        if (pageTitle.includes('پایه ششم') || pageTitle.includes('پایه ۶')) return 'ششم';
+        return 'سوم';
+    }
+
+    // ✅ فاصله بر اساس پایه
+    function getBetweenSpacing(grade) {
+        let g = grade ? grade.toString().trim() : '';
+        if (g === 'اول' || g === '1' || g.includes('اول')) return 130;
+        if (g === 'دوم' || g === '2' || g.includes('دوم')) return 100;
+        if (g === 'ششم' || g === '6' || g.includes('ششم')) return 3;
+        return 65;
+    }
+
+    // ✅ اعمال فاصله‌ها (با حذف spacer های قبلی)
+    function addSpacersToPage() {
+        let tables = document.querySelectorAll('table');
+        if (tables.length === 0) return 0;
+
+        // حذف اسپیسرهای قبلی (برای اجرای مجدد)
+        document.querySelectorAll('.sida-print-spacer').forEach(el => el.remove());
+
+        let grade = getGrade();
+        let betweenSpacing = getBetweenSpacing(grade);
+
+        let comments = [];
+        let iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
+        let c;
+        while (c = iterator.nextNode()) {
+            if (c.nodeValue && c.nodeValue.includes('end ngRepeat') && c.nodeValue.includes('ksarnamehs')) {
+                comments.push(c);
+            }
+        }
+
+        if (comments.length === 0) return 0;
+
+        comments.forEach(function(comment, index) {
+            if (index % 2 === 1) {
+                let topSpacer = document.createElement('div');
+                topSpacer.className = 'sida-print-spacer';
+                topSpacer.style.cssText = 'height:' + TOP_SPACING + 'px;margin:0;padding:0;background:transparent;display:block;page-break-before:always;';
+                comment.parentNode.insertBefore(topSpacer, comment.nextSibling);
+            } else {
+                let spacer = document.createElement('div');
+                spacer.className = 'sida-print-spacer';
+                spacer.style.cssText = 'height:' + betweenSpacing + 'px;margin:15px 0;padding:0;background:transparent;display:block;';
+                comment.parentNode.insertBefore(spacer, comment.nextSibling);
+            }
+        });
+
+        let firstTopSpacer = document.createElement('div');
+        firstTopSpacer.className = 'sida-print-spacer';
+        firstTopSpacer.style.cssText = 'height:' + TOP_SPACING + 'px;margin:0;padding:0;background:transparent;display:block;';
+        if (tables[0]) {
+            tables[0].parentNode.insertBefore(firstTopSpacer, tables[0]);
+        }
+
+        return betweenSpacing;
+    }
+
+    // ==================== اجرای اصلی ====================
+
+    // 🎯 حالت اول: اگر پیش‌نمایش از قبل باز شده، فوراً فاصله‌ها را اعمال کن
+    if (isPreviewReady()) {
+        const usedSpacing = addSpacersToPage();
+
+        if (usedSpacing > 0) {
+            let printBtn = Array.from(document.querySelectorAll('button,input'))
+                .find(el => el.innerText && (el.innerText.includes('پرینت') || el.innerText.includes('چاپ')));
+
+            if (printBtn) {
+                printBtn.style.outline = '3px solid #f5a623';
+                printBtn.style.outlineOffset = '2px';
+                printBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                alert('✅ فاصله ' + TOP_SPACING + 'px بالای هر صفحه و ' + usedSpacing + 'px بین کارنامه‌ها (هوشمند) اضافه شد.\n\n🖨️ لطفاً حالا دکمه پرینت را به صورت دستی بزنید.');
+            } else {
+                alert('✅ فاصله‌ها اضافه شد، اما دکمه پرینت پیدا نشد. لطفاً خودتان پرینت بگیرید.');
+            }
+        } else {
+            alert('⚠️ پیش‌نمایش باز است، اما جدول کارنامه‌ای برای اعمال فاصله پیدا نشد!');
+        }
+        return;
+    }
+
+    // 🎯 حالت دوم: پیش‌نمایش باز نیست. چک‌باکس‌ها را تیک بزن و دکمه خروجی را کلیک کن
+    let allCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]')]
+        .filter(cb => !cb.closest('thead'));
+
+    if (!allCheckboxes.length) {
+        alert('چک‌باکسی پیدا نشد!\n\nمطمئن شو در صفحهٔ لیست دانش‌آموزان هستی و پیش‌نمایش باز نیست.');
+        return;
+    }
+
+    let checkedCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]:checked')]
+        .filter(cb => !cb.closest('thead'));
+
+    let selectedCount;
+    if (checkedCheckboxes.length > 0) {
+        selectedCount = checkedCheckboxes.length;
+        checkedCheckboxes.forEach(cb => {
+            if (!cb.checked) cb.click();
+        });
+    } else {
+        selectedCount = allCheckboxes.length;
+        allCheckboxes.forEach(cb => {
+            if (!cb.checked) cb.click();
+        });
+    }
+
+    let btn = [...document.querySelectorAll('button,input')]
+        .find(el => el.innerText && el.innerText.includes('کارنامه برای رکوردهای انتخاب شده'));
+
+    if (!btn) {
+        alert('دکمهٔ «کارنامه برای رکوردهای انتخاب شده» پیدا نشد!');
+        return;
+    }
+
+    // کلیک روی دکمه خروجی
+    btn.click();
+
+    // راهنمایی کاربر
+    alert('✅ ' + selectedCount + ' دانش‌آموز انتخاب شدند و درخواست خروجی ارسال شد.\n\n⏳ لطفاً صبر کنید تا پیش‌نمایش در صفحه باز شود، سپس دوباره روی دکمهٔ «چاپ گروهی هوشمند» در منوی ابزارها کلیک کنید تا فاصله‌ها اعمال شود.');
+}
 
     // ==================== ابزار ۳: ساخت دفترچه تماس (نسخه API) ====================
     function contactBookExtractor() {
@@ -4179,180 +4362,190 @@ function photoUploadTool() {
 
         createPanel();
     }
+// ==================== ابزار ۶: چاپ دفتر نتایج (نسخهٔ هوشمند - اجرای پس از پیش‌نمایش) ====================
+function printReportCard() {
+    if (printReportCard.running) {
+        alert('ابزار در حال اجراست. لطفاً صبر کنید.');
+        return;
+    }
+    printReportCard.running = true;
 
-    // ==================== ابزار ۶: چاپ دفتر نتایج ====================
-    function printReportCard() {
-        if (printReportCard.running) {
-            alert('ابزار در حال اجراست. لطفاً صبر کنید.');
-            return;
+    cleanupAllPanels();
+
+    function designedByYousefMasoumi() {
+        /* طراح: یوسف معصومی - شاغل در آموزش و پرورش ناحیه ۳ تبریز */
+
+        // ✅ تشخیص وجود پیش‌نمایش (کامنت ksarnamehs)
+        function isPreviewReady() {
+            const iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
+            let c;
+            while ((c = iterator.nextNode())) {
+                if (c.nodeValue && c.nodeValue.includes('ksarnamehs')) return true;
+            }
+            return false;
         }
-        printReportCard.running = true;
 
-        cleanupAllPanels();
-
-        function designedByYousefMasoumi() {
-            /* طراح: یوسف معصومی - شاغل در آموزش و پرورش ناحیه ۳ تبریز */
-
-            function getGrade() {
-                let gradeCells = document.querySelectorAll('td.btext, td[class*="btext"]');
-                for (let cell of gradeCells) {
-                    let text = cell.innerText.trim();
-                    if (['اول','دوم','سوم','چهارم','پنجم','ششم','1','2','3','4','5','6'].includes(text)) {
-                        return text;
+        // ✅ تشخیص پایه
+        function getGrade() {
+            const gradeCells = document.querySelectorAll('td.btext, td[class*="btext"]');
+            for (let cell of gradeCells) {
+                const text = cell.innerText.trim();
+                if (['اول','دوم','سوم','چهارم','پنجم','ششم','1','2','3','4','5','6'].includes(text)) return text;
+            }
+            const headers = document.querySelectorAll('th');
+            let gradeIndex = -1;
+            for (let th of headers) {
+                if (th.innerText.trim() === 'پایه' || th.innerText.trim() === 'پایه ') {
+                    gradeIndex = Array.from(th.parentElement.children).indexOf(th);
+                    break;
+                }
+            }
+            if (gradeIndex !== -1) {
+                const rows = document.querySelectorAll('table tbody tr');
+                for (let row of rows) {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length > gradeIndex) {
+                        const text = cells[gradeIndex].innerText.trim();
+                        if (['اول','دوم','سوم','چهارم','پنجم','ششم','1','2','3','4','5','6'].includes(text)) return text;
                     }
                 }
-                let headers = document.querySelectorAll('th');
-                let gradeIndex = -1;
-                for (let th of headers) {
-                    if (th.innerText.trim() === 'پایه' || th.innerText.trim() === 'پایه ') {
-                        gradeIndex = Array.from(th.parentElement.children).indexOf(th);
-                        break;
-                    }
+            }
+            const pageTitle = document.title || '';
+            if (pageTitle.includes('پایه اول') || pageTitle.includes('پایه ۱')) return 'اول';
+            if (pageTitle.includes('پایه دوم') || pageTitle.includes('پایه ۲')) return 'دوم';
+            if (pageTitle.includes('پایه سوم') || pageTitle.includes('پایه ۳')) return 'سوم';
+            if (pageTitle.includes('پایه چهارم') || pageTitle.includes('پایه ۴')) return 'چهارم';
+            if (pageTitle.includes('پایه پنجم') || pageTitle.includes('پایه ۵')) return 'پنجم';
+            if (pageTitle.includes('پایه ششم') || pageTitle.includes('پایه ۶')) return 'ششم';
+            return 'سوم';
+        }
+
+        function getBetweenSpacing(grade) {
+            const g = grade ? grade.toString().trim() : '';
+            if (g === 'اول' || g === '1' || g.includes('اول')) return 130;
+            if (g === 'دوم' || g === '2' || g.includes('دوم')) return 100;
+            if (g === 'ششم' || g === '6' || g.includes('ششم')) return 3;
+            return 65;
+        }
+
+        // ✅ اعمال فاصله‌ها
+        function applySpacers(grade, betweenSpacing) {
+            const tables = document.querySelectorAll('table');
+            if (tables.length === 0) return 0;
+
+            // حذف اسپیسرهای قبلی در صورت اجرای مجدد
+            document.querySelectorAll('.sida-print-spacer').forEach(el => el.remove());
+
+            const comments = [];
+            const iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
+            let c;
+            while ((c = iterator.nextNode())) {
+                if (c.nodeValue && c.nodeValue.includes('end ngRepeat') && c.nodeValue.includes('ksarnamehs')) {
+                    comments.push(c);
                 }
-                if (gradeIndex !== -1) {
-                    let rows = document.querySelectorAll('table tbody tr');
-                    for (let row of rows) {
-                        let cells = row.querySelectorAll('td');
-                        if (cells.length > gradeIndex) {
-                            let text = cells[gradeIndex].innerText.trim();
-                            if (['اول','دوم','سوم','چهارم','پنجم','ششم','1','2','3','4','5','6'].includes(text)) {
-                                return text;
-                            }
-                        }
-                    }
-                }
-                let pageTitle = document.title || '';
-                if (pageTitle.includes('پایه اول') || pageTitle.includes('پایه ۱')) return 'اول';
-                if (pageTitle.includes('پایه دوم') || pageTitle.includes('پایه ۲')) return 'دوم';
-                if (pageTitle.includes('پایه سوم') || pageTitle.includes('پایه ۳')) return 'سوم';
-                if (pageTitle.includes('پایه چهارم') || pageTitle.includes('پایه ۴')) return 'چهارم';
-                if (pageTitle.includes('پایه پنجم') || pageTitle.includes('پایه ۵')) return 'پنجم';
-                if (pageTitle.includes('پایه ششم') || pageTitle.includes('پایه ۶')) return 'ششم';
-                return 'سوم';
             }
 
-            function getBetweenSpacing(grade) {
-                let g = grade ? grade.toString().trim() : '';
-                if (g === 'اول' || g === '1' || g.includes('اول')) return 130;
-                if (g === 'دوم' || g === '2' || g.includes('دوم')) return 100;
-                if (g === 'ششم' || g === '6' || g.includes('ششم')) return 3;
-                return 65;
-            }
+            if (comments.length === 0) return 0;
 
-            function addSpacersToPage() {
-                let tables = document.querySelectorAll('table');
-                if (tables.length === 0) return false;
-
-                let grade = getGrade();
-                let betweenSpacing = getBetweenSpacing(grade);
-
-                let comments = [];
-                let iterator = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);
-                let c;
-                while (c = iterator.nextNode()) {
-                    if (c.nodeValue && c.nodeValue.includes('end ngRepeat') && c.nodeValue.includes('ksarnamehs')) {
-                        comments.push(c);
-                    }
+            comments.forEach((comment, index) => {
+                if (index % 2 === 1) {
+                    const topSpacer = document.createElement('div');
+                    topSpacer.className = 'sida-print-spacer';
+                    topSpacer.style.cssText = 'height:5px;margin:0;padding:0;background:transparent;display:block;page-break-before:always;';
+                    comment.parentNode.insertBefore(topSpacer, comment.nextSibling);
+                } else {
+                    const spacer = document.createElement('div');
+                    spacer.className = 'sida-print-spacer';
+                    spacer.style.cssText = 'height:' + betweenSpacing + 'px;margin:15px 0;padding:0;background:transparent;display:block;';
+                    comment.parentNode.insertBefore(spacer, comment.nextSibling);
                 }
+            });
 
-                comments.forEach(function(comment, index) {
-                    if (index % 2 === 1) {
-                        let topSpacer = document.createElement('div');
-                        topSpacer.style.height = '5px';
-                        topSpacer.style.margin = '0';
-                        topSpacer.style.padding = '0';
-                        topSpacer.style.backgroundColor = 'transparent';
-                        topSpacer.style.display = 'block';
-                        topSpacer.style.pageBreakBefore = 'always';
-                        comment.parentNode.insertBefore(topSpacer, comment.nextSibling);
-                    } else {
-                        let spacer = document.createElement('div');
-                        spacer.style.height = betweenSpacing + 'px';
-                        spacer.style.margin = '15px 0';
-                        spacer.style.padding = '0';
-                        spacer.style.backgroundColor = 'transparent';
-                        spacer.style.display = 'block';
-                        comment.parentNode.insertBefore(spacer, comment.nextSibling);
-                    }
-                });
+            const firstTopSpacer = document.createElement('div');
+            firstTopSpacer.className = 'sida-print-spacer';
+            firstTopSpacer.style.cssText = 'height:5px;margin:0;padding:0;background:transparent;display:block;';
+            if (tables[0]) tables[0].parentNode.insertBefore(firstTopSpacer, tables[0]);
 
-                let firstTopSpacer = document.createElement('div');
-                firstTopSpacer.style.height = '5px';
-                firstTopSpacer.style.margin = '0';
-                firstTopSpacer.style.padding = '0';
-                firstTopSpacer.style.backgroundColor = 'transparent';
-                firstTopSpacer.style.display = 'block';
+            return betweenSpacing;
+        }
 
-                let firstTable = tables[0];
-                if (firstTable) {
-                    firstTable.parentNode.insertBefore(firstTopSpacer, firstTable);
+        // ==================== اجرای اصلی ====================
+        
+        // 🎯 چک می‌کنیم آیا پیش‌نمایش از قبل باز شده است یا نه
+        if (isPreviewReady()) {
+            // حالت اول: پیش‌نمایش باز است! فوراً فاصله‌ها را اعمال کن
+            const grade = getGrade();
+            const spacing = getBetweenSpacing(grade);
+            const usedSpacing = applySpacers(grade, spacing);
+
+            if (usedSpacing > 0) {
+                const printBtn = Array.from(document.querySelectorAll('button,input')).find(el =>
+                    el.innerText && (el.innerText.includes('پرینت') || el.innerText.includes('چاپ'))
+                );
+
+                if (printBtn) {
+                    printBtn.style.outline = '3px solid #f5a623';
+                    printBtn.style.outlineOffset = '2px';
+                    printBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    alert('✅ فاصله 5px بالای هر صفحه و ' + usedSpacing + 'px بین کارنامه‌ها (هوشمند) اضافه شد.\n\n🖨️ لطفاً حالا دکمه پرینت را به صورت دستی بزنید.');
+                } else {
+                    alert('✅ فاصله‌ها اضافه شد، اما دکمه پرینت پیدا نشد. لطفاً خودتان پرینت بگیرید.');
                 }
-
-                return betweenSpacing;
-            }
-
-            let allCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]')]
-                .filter(cb => !cb.closest('thead'));
-
-            if (!allCheckboxes.length) {
-                alert('چک‌باکسی پیدا نشد!');
-                return;
-            }
-
-            let checkedCheckboxes = [...document.querySelectorAll('table input[type="checkbox"]:checked')]
-                .filter(cb => !cb.closest('thead'));
-
-            if (checkedCheckboxes.length > 0) {
-                checkedCheckboxes.forEach(cb => { if (!cb.checked) cb.click(); });
-                alert(checkedCheckboxes.length + ' دانش‌آموز انتخاب شده‌اند.');
             } else {
-                allCheckboxes.forEach(cb => { if (!cb.checked) cb.click(); });
-                alert(allCheckboxes.length + ' دانش‌آموز به صورت خودکار انتخاب شدند.');
+                alert('⚠️ پیش‌نمایش باز است، اما جدول کارنامه‌ای برای اعمال فاصله پیدا نشد!');
             }
-
-            let btn = [...document.querySelectorAll('button,input')].find(el =>
-                el.innerText.includes('خروجی دفتر نتایج ارزشیابی') ||
-                el.innerText.includes('دفتر نتایج') ||
-                el.innerText.includes('خروجی')
-            );
-
-            if (!btn) {
-                alert('دکمه "خروجی دفتر نتایج ارزشیابی" پیدا نشد!');
-                return;
-            }
-
-            btn.click();
-
-            setTimeout(function() {
-                let usedSpacing = addSpacersToPage();
-
-                setTimeout(function() {
-                    let printBtn = [...document.querySelectorAll('button,input')].find(el =>
-                        el.innerText.includes('پرینت') || el.innerText.includes('چاپ')
-                    );
-                    if (printBtn) {
-                        printBtn.style.outline = '3px solid #f5a623';
-                        printBtn.style.outlineOffset = '2px';
-                        printBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-                        alert('✅ فاصله 5px بالای هر صفحه و ' + usedSpacing + 'px بین کارنامه‌ها (هوشمند) اضافه شد.\n\n🖨️ لطفاً حالا دکمه پرینت را به صورت دستی بزنید.');
-                    } else {
-                        alert('✅ فاصله‌ها اضافه شد، اما دکمه پرینت پیدا نشد. لطفاً خودتان پرینت بگیرید.');
-                    }
-                }, 500);
-            }, 4000);
-        }
-
-        if (!designedByYousefMasoumi.toString().includes('یوسف معصومی') || !designedByYousefMasoumi.toString().includes('ناحیه ۳ تبریز')) {
-            alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
             printReportCard.running = false;
             return;
         }
 
-        designedByYousefMasoumi();
+        // حالت دوم: پیش‌نمایش باز نیست. چک‌باکس‌ها را تیک بزن و دکمه خروجی را کلیک کن.
+        const allCheckboxes = Array.from(document.querySelectorAll('table input[type="checkbox"]'))
+            .filter(cb => !cb.closest('thead'));
+
+        if (!allCheckboxes.length) {
+            alert('چک‌باکسی پیدا نشد!\n\nمطمئن شو در صفحهٔ لیست دانش‌آموزان هستی و پیش‌نمایش باز نیست.');
+            printReportCard.running = false;
+            return;
+        }
+
+        const checkedCount = allCheckboxes.filter(cb => cb.checked).length;
+        if (checkedCount === 0) {
+            allCheckboxes.forEach(cb => { if (!cb.checked) cb.click(); });
+        }
+
+        const btn = Array.from(document.querySelectorAll('button,input')).find(el =>
+            el.innerText && (
+                el.innerText.includes('خروجی دفتر نتایج ارزشیابی') ||
+                el.innerText.includes('دفتر نتایج') ||
+                el.innerText.includes('خروجی')
+            )
+        );
+
+        if (!btn) {
+            alert('دکمه "خروجی دفتر نتایج ارزشیابی" پیدا نشد!');
+            printReportCard.running = false;
+            return;
+        }
+
+        // کلیک روی دکمه خروجی
+        btn.click();
+        
+        // راهنمایی کاربر
+        alert('⏳ درخواست خروجی ارسال شد.\n\nلطفاً صبر کنید تا پیش‌نمایش در صفحه باز شود، سپس دوباره روی دکمهٔ «چاپ دفتر نتایج» در منوی ابزارها کلیک کنید تا فاصله‌ها اعمال شود.');
+
         printReportCard.running = false;
     }
 
+    // بررسی امنیتی
+    if (!designedByYousefMasoumi.toString().includes('یوسف معصومی') ||
+        !designedByYousefMasoumi.toString().includes('ناحیه ۳ تبریز')) {
+        alert('⚠️ این ابزار دستکاری شده است. نام سازنده حذف شده و ابزار غیرفعال شد.');
+        printReportCard.running = false;
+        return;
+    }
+
+    designedByYousefMasoumi();
+}
     // ==================== ابزار ۷: استخراج عکس (نسخه API) ====================
     function photoExtractTool() {
         if (document.getElementById('multiPageExtractPanel')) {
