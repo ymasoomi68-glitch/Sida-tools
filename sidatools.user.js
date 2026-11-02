@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛠️ جعبه ابزار هوشمند سیدا
 // @namespace    http://tampermonkey.net/
-// @version      16.1.0
+// @version      16.1.1
 // @description  داشبورد کشویی ابزارهای کمکی سیدا - نسخه قفل‌دار
 // @author       You
 // @match        https://sida.medu.ir/*
@@ -5859,7 +5859,6 @@ function extractClassListTool() {
 
     // ============================================================
     //  🎨 فونت و ابعاد تطبیقی بر اساس تعداد دانش‌آموز
-    //  هرچه کمتر → بزرگ‌تر
     // ============================================================
     function getAdaptiveStyle(count) {
         var fontSize, paddingV, headerFont, codeFont;
@@ -5898,7 +5897,6 @@ function extractClassListTool() {
         html += '<title>لیست دانش‌آموزان</title>';
         html += '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->';
         html += '<style>';
-        // حاشیهٔ بیشتر از بالا/چپ/راست، کم از پایین
         html += '@page { size: A4 portrait; margin: 0.8cm 1cm 0.3cm 1cm; mso-page-orientation: portrait; }';
         html += 'html, body { margin: 0; padding: 0; }';
         html += 'body { font-family: "B Nazanin", "Tahoma", sans-serif; direction: rtl; }';
@@ -5916,21 +5914,19 @@ function extractClassListTool() {
         html += 'table { page-break-inside: avoid; }';
         html += '</style></head><body>';
 
-        // ===== هدر تک‌خطی =====
         html += '<div class="header-line">';
         html += 'لیست دانش آموزان کلاس ' + escapeHtml(className);
         html += ' &nbsp;&nbsp;&nbsp; تعداد : ' + count;
         html += ' &nbsp;&nbsp;&nbsp; <span class="label">نام آموزگار:</span>';
         html += '</div>';
 
-                // ===== جدول =====
         html += '<table>';
         html += '<colgroup>';
-        html += '<col style="width:5%;">';   // ردیف
-        html += '<col style="width:15%;">';  // کد
-        html += '<col style="width:30%;">';  // نام
+        html += '<col style="width:5%;">';
+        html += '<col style="width:15%;">';
+        html += '<col style="width:30%;">';
         for (var c = 0; c < 10; c++) {
-            html += '<col style="width:5%;">'; // ۱۰ ستون خالی
+            html += '<col style="width:5%;">';
         }
         html += '</colgroup>';
         html += '<thead><tr>';
@@ -5958,6 +5954,7 @@ function extractClassListTool() {
         html += '</body></html>';
         return html;
     }
+
     // ============================================================
     //  📥 دانلود Word
     // ============================================================
@@ -5978,6 +5975,65 @@ function extractClassListTool() {
         link.click();
         document.body.removeChild(link);
         setTimeout(function(){ URL.revokeObjectURL(link.href); }, 1000);
+    }
+
+    // ============================================================
+    //  📊 دانلود Excel (CSV)
+    // ============================================================
+    function generateCsvFile(className, students) {
+        if (!students || students.length === 0) {
+            alert('❌ هیچ داده‌ای یافت نشد!');
+            return;
+        }
+
+        const rows = [['ردیف', 'کد دانش‌آموزی', 'نام خانوادگی', 'نام']];
+        students.forEach((s, i) => {
+            rows.push([i + 1, s.code || '', s.family || '', s.name || '']);
+        });
+
+        let csv = '\uFEFF'; // BOM برای Excel فارسی
+        rows.forEach(row => {
+            csv += row.map(v => {
+                v = String(v == null ? '' : v);
+                if (v.indexOf(',') > -1 || v.indexOf('"') > -1 || v.indexOf('\n') > -1) {
+                    return '"' + v.replace(/"/g, '""') + '"';
+                }
+                return v;
+            }).join(',') + '\r\n';
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        const safeName = className.replace(/[^\u0600-\u06FF\w\s\-]/g, '').replace(/\s+/g, ' ').trim();
+        link.download = 'لیست کلاس ' + safeName + '.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    }
+
+    // ============================================================
+    //  📊 دانلود اکسل همهٔ کلاس‌ها (CSV جداگانه)
+    // ============================================================
+    function downloadAllCsv() {
+        if (allClasses.length === 0) {
+            alert('❌ هیچ کلاسی جمع‌آوری نشده است!');
+            return;
+        }
+
+        const totalStudents = allClasses.reduce((acc, cls) => acc + cls.students.length, 0);
+        if (!confirm('دانلود ' + allClasses.length + ' کلاس با مجموع ' + totalStudents + ' دانش‌آموز؟\n\nهر کلاس یه فایل CSV جدا می‌شه.')) {
+            return;
+        }
+
+        allClasses.forEach((cls, index) => {
+            setTimeout(() => {
+                generateCsvFile(cls.className, cls.students);
+            }, index * 500);
+        });
+
+        showStatus('📊 ' + allClasses.length + ' فایل CSV در حال دانلود...', 'info');
     }
 
     // ============================================================
@@ -6029,7 +6085,6 @@ function extractClassListTool() {
             return;
         }
 
-        // ساخت سند ترکیبی
         var combined = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
         combined += '<head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">';
         combined += '<title>لیست دانش‌آموزان</title>';
@@ -6063,10 +6118,10 @@ function extractClassListTool() {
 
             combined += '<table style="font-size:' + st.fontSize + 'pt;">';
             combined += '<colgroup>';
-            combcombined += '<col style="width:5%;">';
+            combined += '<col style="width:5%;">';
             combined += '<col style="width:15%;">';
             combined += '<col style="width:30%;">';
-           for (var c = 0; c < 10; c++) combined += '<col style="width:5%;">';
+            for (var c = 0; c < 10; c++) combined += '<col style="width:5%;">';
             combined += '</colgroup>';
             combined += '<thead><tr>';
             combined += '<th style="padding:' + st.headerPaddingV + 'px 3px;font-size:' + (st.fontSize + 0.5) + 'pt;">ردیف</th>';
@@ -6155,9 +6210,10 @@ function extractClassListTool() {
                     if (cls.students.length > 1) html += '، ' + escapeHtml(cls.students[1].family + ' ' + cls.students[1].name);
                     html += '</div>';
                 }
-                html += '<div style="display:flex;gap:5px;">';
-                html += '<button class="download-class-btn" data-index="' + index + '" title="دانلود ورد" style="flex:1;background:#10b981;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">📄 دانلود</button>';
-                html += '<button class="print-class-btn" data-index="' + index + '" title="چاپ / PDF" style="flex:1;background:#3b82f6;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">🖨️ چاپ</button>';
+                html += '<div style="display:flex;gap:5px;flex-wrap:wrap;">';
+                html += '<button class="download-class-btn" data-index="' + index + '" title="دانلود ورد" style="flex:1;background:#10b981;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;min-width:60px;">📄 ورد</button>';
+                html += '<button class="excel-class-btn" data-index="' + index + '" title="دانلود اکسل" style="flex:1;background:#217346;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;min-width:60px;">📊 اکسل</button>';
+                html += '<button class="print-class-btn" data-index="' + index + '" title="چاپ / PDF" style="flex:1;background:#3b82f6;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;min-width:60px;">🖨️ چاپ</button>';
                 html += '<button class="delete-class-btn" data-index="' + index + '" title="حذف" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">🗑️</button>';
                 html += '</div></div>';
             });
@@ -6168,6 +6224,14 @@ function extractClassListTool() {
                     let index = parseInt(btn.getAttribute('data-index'));
                     let cls = allClasses[index];
                     if (cls) generateWordFile(cls.className, cls.students);
+                };
+            });
+
+            document.querySelectorAll('.excel-class-btn').forEach(function(btn) {
+                btn.onclick = function() {
+                    let index = parseInt(btn.getAttribute('data-index'));
+                    let cls = allClasses[index];
+                    if (cls) generateCsvFile(cls.className, cls.students);
                 };
             });
 
@@ -6452,12 +6516,12 @@ function extractClassListTool() {
                 '</div>' +
 
                 '<div style="background:#f5f3ff;padding:14px;border-radius:8px;margin-bottom:16px;border-right:4px solid #8b5cf6;">' +
-                    '<h3 style="color:#5b21b6;margin-bottom:10px;font-size:18px;">🖨️ چاپ / PDF</h3>' +
+                    '<h3 style="color:#5b21b6;margin-bottom:10px;font-size:18px;">📊 دانلود / چاپ</h3>' +
                     '<ul style="margin-right:20px;margin-top:8px;">' +
-                        '<li>هر کلاس دکمهٔ «🖨️ چاپ» جداگانه دارد</li>' +
+                        '<li>هر کلاس دکمه‌های «📄 ورد»، «📊 اکسل» و «🖨️ چاپ» جداگانه دارد</li>' +
+                        '<li>دکمهٔ «📊 دانلود اکسل همه» همهٔ کلاس‌ها را به صورت فایل CSV جداگانه می‌فرستد</li>' +
                         '<li>دکمهٔ «🖨️ چاپ همه» همهٔ کلاس‌ها را در یک سند می‌فرستد (هر کلاس یک صفحه)</li>' +
-                        '<li>فونت و اندازهٔ جدول خودکار بر اساس تعداد دانش‌آموز تنظیم می‌شه</li>' +
-                        '<li>در پنجرهٔ چاپ «Save as PDF» یا «Microsoft Print to PDF» را انتخاب کن</li>' +
+                        '<li>فایل CSV در Excel باز می‌شه و نیازی به کتابخانه اضافی نداره</li>' +
                     '</ul>' +
                 '</div>' +
 
@@ -6508,9 +6572,12 @@ function extractClassListTool() {
             '<div style="background:#fff7ed;padding:8px;border-radius:6px;font-size:14px;color:#9a3412;text-align:center;border:1px solid #fed7aa;margin-bottom:6px;">⚠️ اگه تأیید نهایی کلاس‌بندی نزدی:</div>' +
             '<button id="btnClassExtractNew" style="width:100%;background:#f59e0b;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:14px;margin-bottom:8px;">📋 لیست کلاسی</button>' +
             '<button id="btnStop" style="width:100%;background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;display:none;margin-bottom:8px;font-size:14px;">⛔ توقف</button>' +
+            '<div style="display:flex;gap:6px;margin-bottom:6px;">' +
+                '<button id="btnDownloadAll" style="flex:1;background:#10b981;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:12px;">📥 ورد همه</button>' +
+                '<button id="btnPrintAll" style="flex:1;background:#8b5cf6;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:12px;">🖨️ چاپ همه</button>' +
+            '</div>' +
             '<div style="display:flex;gap:6px;margin-bottom:8px;">' +
-                '<button id="btnDownloadAll" style="flex:1;background:#10b981;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:13px;">📥 دانلود همه</button>' +
-                '<button id="btnPrintAll" style="flex:1;background:#8b5cf6;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:13px;">🖨️ چاپ همه</button>' +
+                '<button id="btnExcelAll" style="flex:1;background:#217346;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:13px;">📊 دانلود اکسل همه</button>' +
             '</div>' +
             '<button id="btnReset" style="background:transparent;color:#888899;border:1px solid #2a2d42;padding:8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:14px;width:100%;margin-bottom:10px;">🔄 پاک کردن همه</button>' +
             '<div style="font-size:14px;color:#888899;margin-bottom:6px;">کلاس‌های جمع‌آوری شده:</div>' +
@@ -6643,6 +6710,11 @@ function extractClassListTool() {
         // ===== دکمه چاپ همه =====
         document.getElementById('btnPrintAll').onclick = function() {
             printAllClasses();
+        };
+
+        // ===== دکمه دانلود اکسل همه (CSV) =====
+        document.getElementById('btnExcelAll').onclick = function() {
+            downloadAllCsv();
         };
 
         document.getElementById('btnReset').onclick = function() {
